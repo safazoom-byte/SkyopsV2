@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+*.mjs
+*.cjs
+build_out.txt
+build_output.txt

@@ -1,0 +1,1100 @@
+import { createClient } from "@supabase/supabase-js";
+import {
+  Flight,
+  Staff,
+  ShiftConfig,
+  DailyProgram,
+  LeaveRequest,
+  IncomingDuty,
+  ProgramVersion,
+  UserProfile,
+  AuditLog,
+  Airport,
+} from "../types";
+
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL ||
+  "https://hldvxfurkstqhmmktxsz.supabase.co";
+const SUPABASE_ANON_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  "sb_publishable_E9StxaACROyElt3UQ8qVYw_C0zsUQzy";
+
+const isConfigured =
+  SUPABASE_URL.startsWith("http") && SUPABASE_ANON_KEY.length > 5;
+
+export const supabase = isConfigured
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+export const auth = {
+  async signUp(email: string, pass: string) {
+    const client = supabase;
+    if (!client) return { error: new Error("Cloud Uplink Not Configured") };
+    return await client.auth.signUp({ email, password: pass });
+  },
+  async signIn(email: string, pass: string) {
+    const client = supabase;
+    if (!client) return { error: new Error("Cloud Uplink Not Configured") };
+    return await client.auth.signInWithPassword({ email, password: pass });
+  },
+  async signOut() {
+    const client = supabase;
+    if (!client) return;
+    return await client.auth.signOut();
+  },
+  async getSession(): Promise<any> {
+    const client = supabase;
+    if (!client) return null;
+    try {
+      const { data, error } = await client.auth.getSession();
+      if (error) {
+        console.warn("Session fetch error:", error.message);
+        if (error.message.toLowerCase().includes("refresh token")) {
+          await client.auth.signOut().catch(() => {});
+          
+          if (typeof window !== "undefined") {
+            try {
+              for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                  localStorage.removeItem(key);
+                }
+              }
+            } catch (e) {
+              // ignore localStorage errors
+            }
+          }
+        }
+        return null;
+      }
+      return data?.session || null;
+    } catch (e) {
+      console.warn("getSession exception:", e);
+      return null;
+    }
+  },
+  onAuthStateChange(callback: (event: string, session: any) => void) {
+    const client = supabase;
+    if (!client) return () => {};
+    const {
+      data: { subscription },
+    } = client.auth.onAuthStateChange((event, session) => {
+      callback(event, session);
+    });
+    return () => subscription.unsubscribe();
+  },
+};
+
+let saveProgramsQueue: Promise<void> | null = null;
+
+let cachedProfile: UserProfile | null = null;
+let profileFetchTime = 0;
+
+export const db = {
+  clearProfileCache() {
+    cachedProfile = null;
+    profileFetchTime = 0;
+  },
+
+  async getMutationContext() {
+    const session = await auth.getSession();
+    if (!session) return null;
+    const profile = await this.getUserProfile();
+    
+    // Super admin must have an airport selected to mutate data
+    if (profile?.role === 'super_admin' && !profile?.airport_id) {
+       return null;
+    }
+
+    return {
+      userId: session.user.id,
+      airportId: profile?.airport_id || null,
+      matchCol: profile?.airport_id ? "airport_id" : "user_id",
+      matchVal: profile?.airport_id ? profile.airport_id : session.user.id,
+      role: profile?.role
+    };
+  },
+
+  async migrateUnassignedData(airportId: string) {
+    const client = supabase;
+    if (!client) return { success: false, error: "No DB client" };
+    try {
+      const tables = ["flights", "staff", "shifts", "programs", "leave_requests", "incoming_duties"];
+      for (const table of tables) {
+        // fetch rows where airport_id is null or global, for this user
+        const { data: nullRows } = await client.from(table).select("id").is("airport_id", null);
+        const { data: globalRows } = await client.from(table).select("id").eq("airport_id", "GLOBAL");
+        
+        const allIds = [...(nullRows || []).map(r => r.id), ...(globalRows || []).map(r => r.id)];
+        
+        if (allIds.length > 0) {
+          // split into chunks of 100
+          for (let i = 0; i < allIds.length; i += 100) {
+            const batch = allIds.slice(i, i + 100);
+            await client.from(table).update({ airport_id: airportId }).in("id", batch);
+          }
+        }
+      }
+      return { success: true };
+    } catch (e: any) {
+      console.warn("Migration failed", e);
+      return { success: false, error: e.message };
+    }
+  },
+
+  async fetchAll() {
+    const client = supabase;
+    if (!client) return null;
+    try {
+      const session = await auth.getSession();
+      if (!session) return null;
+      
+      const profile = await this.getUserProfile();
+      
+      // If super_admin has no airport selected, allow global visibility by fetching all
+      let matchCol = profile?.airport_id ? "airport_id" : "user_id";
+      let matchVal = profile?.airport_id ? profile.airport_id : session.user.id;
+      
+      let fQuery = client.from("flights").select("*");
+      let sQuery = client.from("staff").select("*");
+      let shQuery = client.from("shifts").select("*");
+      let pQuery = client.from("programs").select("*");
+      let lQuery = client.from("leave_requests").select("*");
+      let iQuery = client.from("incoming_duties").select("*");
+
+      if (profile?.role === "super_admin" && !profile?.airport_id) {
+        // Global view: do not apply .eq filter
+      } else {
+        fQuery = fQuery.eq(matchCol, matchVal);
+        sQuery = sQuery.eq(matchCol, matchVal);
+        shQuery = shQuery.eq(matchCol, matchVal);
+        pQuery = pQuery.eq(matchCol, matchVal);
+        lQuery = lQuery.eq(matchCol, matchVal);
+        iQuery = iQuery.eq(matchCol, matchVal);
+      }
+
+      const [fRes, sRes, shRes, pRes, lRes, iRes] = await Promise.all([
+        fQuery,
+        sQuery,
+        shQuery,
+        pQuery,
+        lQuery,
+        iQuery,
+      ]);
+
+      const errs = [fRes.error, sRes.error, shRes.error, pRes.error, lRes.error, iRes.error].filter(Boolean);
+      if (errs.length > 0) {
+        throw new Error(errs[0]?.message || "Failed to fetch one or more tables");
+      }
+
+      return {
+        flights: (fRes.data || []).map((f: any) => ({
+          id: f.id,
+          flightNumber: f.flight_number,
+          from: f.origin,
+          to: f.destination,
+          sta: f.sta,
+          std: f.std,
+          eta: f.eta,
+          etd: f.etd,
+          date: f.flight_date,
+          type: f.flight_type || "Turnaround",
+          day: f.day || 0,
+          priority: "Standard" as "High" | "Standard" | "Low",
+        })),
+        staff: (sRes.data || []).map((s: any) => {
+          let workPattern = s.work_pattern;
+          let rosterPeriods = undefined;
+          if (workPattern && workPattern.includes("|")) {
+            const parts = workPattern.split("|");
+            workPattern = parts[0];
+            try {
+              rosterPeriods = JSON.parse(parts[1]);
+            } catch (e) {}
+          }
+          return {
+            id: s.id,
+            name: s.name,
+            initials: s.initials,
+            type: s.type,
+            workPattern: workPattern,
+            isRamp: !!s.is_ramp,
+            isShiftLeader: !!s.is_shift_leader,
+            isOps: !!s.is_operations,
+            isLoadControl: !!s.is_load_control,
+            isLostFound: !!s.is_lost_found,
+            isLabour: !!s.is_labour,
+            isSecurity: !!s.is_security,
+            isDriver: !!s.is_driver,
+            isAccountant: !!s.is_accountant,
+            powerRate: s.power_rate || 75,
+            maxShiftsPerWeek: s.max_shifts_per_week || 5,
+            workFromDate: s.work_from_date,
+            workToDate: s.work_to_date,
+            rosterPeriods,
+            isActive: s.is_active !== false,
+          };
+        }),
+        shifts: (shRes.data || []).map((s: any) => ({
+          id: s.id,
+          day: s.day || 0,
+          pickupDate: s.pickup_date,
+          pickupTime: s.pickup_time,
+          endDate: s.end_date,
+          endTime: s.end_time,
+          minStaff: s.min_staff || 1,
+          maxStaff: s.max_staff || 10,
+          roleCounts: s.role_counts || {},
+          flightIds: s.flight_ids || [],
+        })),
+        programs: (pRes.data || []).map((p: any) => {
+          const rawOffDuty = p.off_duty || [];
+          const notesHacks = rawOffDuty.filter((od: any) => od.staffId === "NOTES_HACK");
+          const driversHacks = rawOffDuty.filter((od: any) => od.staffId === "DRIVERS_HACK");
+          const actualOffDuty = rawOffDuty.filter((od: any) => od.staffId !== "NOTES_HACK" && od.staffId !== "DRIVERS_HACK");
+          
+          let notes = p.notes || {};
+          if (notesHacks.length > 0) {
+             notes = notesHacks[0].data || notes;
+          }
+
+          let shiftDrivers = {};
+          if (driversHacks.length > 0) {
+             shiftDrivers = driversHacks[0].data || {};
+          }
+
+          return {
+            day: p.day,
+            dateString: p.date_string,
+            assignments: p.assignments || [],
+            offDuty: actualOffDuty,
+            notes: notes,
+            shiftDrivers: shiftDrivers,
+          };
+        }),
+        leaveRequests: (lRes.data || []).map((l: any) => ({
+          id: l.id,
+          staffId: l.staff_id,
+          startDate: l.start_date,
+          endDate: l.end_date,
+          type: l.leave_type,
+        })),
+        incomingDuties: (iRes.data || []).map((i: any) => ({
+          id: i.id,
+          staffId: i.staff_id,
+          date: i.date,
+          shiftEndTime: i.shift_end_time,
+        })),
+      };
+    } catch (e: any) {
+      throw e;
+    }
+  },
+
+  async upsertFlight(f: Flight) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("flights").upsert({
+        id: f.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        flight_number: f.flightNumber,
+        origin: f.from,
+        destination: f.to,
+        sta: f.sta || null,
+        std: f.std || null,
+        eta: f.eta || null,
+        etd: f.etd || null,
+        flight_date: f.date,
+        flight_type: f.type,
+        day: f.day,
+      });
+    } catch (e) {
+      console.warn("Failed to upsert flight:", e);
+    }
+  },
+
+  async upsertStaff(s: Staff) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("staff").upsert({
+        id: s.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        name: s.name,
+        initials: s.initials,
+        type: s.type,
+        work_pattern:
+          s.type === "Roster" && s.rosterPeriods
+            ? `${s.workPattern}|${JSON.stringify(s.rosterPeriods)}`
+            : s.workPattern,
+        is_ramp: s.isRamp,
+        is_shift_leader: s.isShiftLeader,
+        is_operations: s.isOps,
+        is_load_control: s.isLoadControl,
+        is_lost_found: s.isLostFound,
+        is_labour: s.isLabour,
+        is_security: s.isSecurity,
+        is_driver: s.isDriver,
+        is_accountant: s.isAccountant,
+        power_rate: s.powerRate,
+        max_shifts_per_week: s.maxShiftsPerWeek,
+        work_from_date: s.workFromDate || null,
+        work_to_date: s.workToDate || null,
+        is_active: s.isActive !== false,
+      });
+    } catch (e) {
+      console.warn("Failed to upsert staff:", e);
+    }
+  },
+
+  async upsertShift(s: ShiftConfig) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("shifts").upsert({
+        id: s.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        day: s.day,
+        pickup_date: s.pickupDate,
+        pickup_time: s.pickupTime,
+        end_date: s.endDate,
+        end_time: s.endTime,
+        min_staff: s.minStaff || 1,
+        max_staff: s.maxStaff || 10,
+        role_counts: s.roleCounts || {},
+        flight_ids: s.flightIds || [],
+      });
+    } catch (e) {
+      console.warn("Failed to upsert shift:", e);
+    }
+  },
+
+  async upsertLeave(l: LeaveRequest) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("leave_requests").upsert({
+        id: l.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        staff_id: l.staffId,
+        start_date: l.startDate,
+        end_date: l.endDate,
+        leave_type: l.type,
+      });
+    } catch (e) {
+      console.warn("Failed to upsert leave:", e);
+    }
+  },
+
+  async upsertLeaves(leaves: LeaveRequest[]) {
+    const client = supabase;
+    if (!client || leaves.length === 0) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("leave_requests").upsert(
+        leaves.map((l) => ({
+          id: l.id,
+          user_id: ctx.userId,
+        airport_id: ctx.airportId,
+          staff_id: l.staffId,
+          start_date: l.startDate,
+          end_date: l.endDate,
+          leave_type: l.type,
+        })),
+      );
+    } catch (e) {
+      console.warn("Failed to upsert leaves:", e);
+    }
+  },
+
+  async upsertIncomingDuty(d: IncomingDuty) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("incoming_duties").upsert({
+        id: d.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        staff_id: d.staffId,
+        date: d.date,
+        shift_end_time: d.shiftEndTime,
+      });
+    } catch (e) {
+      console.warn("Failed to upsert incoming duty:", e);
+    }
+  },
+
+  async upsertIncomingDuties(duties: IncomingDuty[]) {
+    const client = supabase;
+    if (!client || duties.length === 0) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      await client.from("incoming_duties").upsert(
+        duties.map((d) => ({
+          id: d.id,
+          user_id: ctx.userId,
+        airport_id: ctx.airportId,
+          staff_id: d.staffId,
+          date: d.date,
+          shift_end_time: d.shiftEndTime,
+        })),
+      );
+    } catch (e) {
+      console.warn("Failed to upsert incoming duties:", e);
+    }
+  },
+
+  async savePrograms(programs: DailyProgram[]) {
+    const execute = async () => {
+      const client = supabase;
+      if (!client || programs.length === 0) return;
+      const ctx = await this.getMutationContext();
+      if (!ctx) return;
+
+      const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
+
+      try {
+        if (datesToOverwrite.length > 0) {
+          let delQuery = client.from("programs").delete().in("date_string", datesToOverwrite);
+          delQuery = delQuery.eq(ctx.matchCol, ctx.matchVal);
+          const { error: delError } = await delQuery;
+          if (delError) {
+             console.warn("Failed to delete old programs:", delError);
+             return;
+          }
+        }
+
+        const { error: insError } = await client.from("programs").insert(
+          programs.map((p) => {
+            const offDutyToSave = [
+                ...(p.offDuty || []),
+                { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} },
+                { staffId: "DRIVERS_HACK", type: "NIL", data: p.shiftDrivers || {} }
+            ];
+
+            return {
+              user_id: ctx.userId,
+              airport_id: ctx.airportId,
+              day: p.day,
+              date_string: p.dateString || "",
+              assignments: p.assignments || [],
+              off_duty: offDutyToSave,
+            };
+          }),
+        );
+        if (insError) {
+           console.warn("Failed to insert programs:", insError);
+        }
+      } catch (e) {
+        console.warn("Failed to save programs:", e);
+      }
+    };
+
+    if (saveProgramsQueue) {
+       saveProgramsQueue = saveProgramsQueue.then(() => execute()).catch(() => execute());
+    } else {
+       saveProgramsQueue = execute();
+    }
+    await saveProgramsQueue;
+  },
+
+  async deleteFlight(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client.from("flights").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete flight:", e);
+      }
+    }
+  },
+  async deleteStaff(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client.from("staff").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete staff:", e);
+      }
+    }
+  },
+  async deleteShift(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client.from("shifts").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete shift:", e);
+      }
+    }
+  },
+  async deleteLeave(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client.from("leave_requests").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete leave:", e);
+      }
+    }
+  },
+  async deleteIncomingDuty(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client.from("incoming_duties").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete incoming duty:", e);
+      }
+    }
+  },
+
+  async saveProgramVersion(v: ProgramVersion) {
+    const client = supabase;
+    if (!client) return;
+    const ctx = await this.getMutationContext();
+    if (!ctx) return;
+    try {
+      const { error } = await client.from("program_versions").upsert({
+        id: v.id,
+        user_id: ctx.userId,
+        airport_id: ctx.airportId,
+        version_number: v.versionNumber,
+        name: v.name,
+        created_at: v.createdAt,
+        period_start: v.periodStart,
+        period_end: v.periodEnd,
+        programs: v.programs,
+        station_health: v.stationHealth,
+        is_auto_save: v.isAutoSave || false,
+      });
+      if (error) {
+         console.warn("Failed to save program version:", error);
+      }
+    } catch (e) {
+      console.warn("Failed to save program version:", e);
+    }
+  },
+
+  async getProgramVersions(): Promise<ProgramVersion[]> {
+    const client = supabase;
+    if (!client) return [];
+    
+    // For reads, we can use the regular context or fallback if super admin
+    const profile = await this.getUserProfile();
+    let query = client.from("program_versions").select("*").order("created_at", { ascending: false });
+    
+    if (profile?.role === "super_admin" && !profile?.airport_id) {
+       // Global view: no filters
+    } else {
+       const ctx = await this.getMutationContext();
+       if (!ctx) return [];
+       query = query.eq(ctx.matchCol, ctx.matchVal);
+    }
+
+    const { data } = await query;
+    if (!data) return [];
+    return data.map((v: any) => ({
+      id: v.id,
+      versionNumber: v.version_number,
+      name: v.name,
+      createdAt: v.created_at,
+      periodStart: v.period_start,
+      periodEnd: v.period_end,
+      programs: v.programs,
+      stationHealth: v.station_health,
+      isAutoSave: v.is_auto_save,
+    }));
+  },
+
+  async deleteProgramVersion(id: string) {
+    const client = supabase;
+    const ctx = await this.getMutationContext();
+    if (client && ctx) {
+      try {
+        await client
+          .from("program_versions")
+          .delete()
+          .eq("id", id)
+          .eq(ctx.matchCol, ctx.matchVal);
+      } catch (e) {
+        console.warn("Failed to delete program version:", e);
+      }
+    }
+  },
+
+  async getUserProfile(forceRefresh = false): Promise<UserProfile | null> {
+    const session = await auth.getSession();
+    if (!session || !supabase) return null;
+
+    if (!forceRefresh && cachedProfile && Date.now() - profileFetchTime < 5 * 60 * 1000) {
+      return cachedProfile;
+    }
+
+    let profile: UserProfile | null = null;
+    try {
+      const { data, error: selectError } = await supabase
+        .from("user_profiles")
+          .select("*")
+          .eq("id", session.user.id)
+          .single();
+        if (selectError) console.warn("Fetch profile error:", JSON.stringify(selectError));
+        if (data) {
+          profile = {
+            id: data.id,
+            email: data.email,
+            role: data.role || "planner",
+            airport_id: data.airport_id,
+            aiDailyLimit: data.ai_daily_limit ?? 5,
+            aiWeeklyLimit: data.ai_weekly_limit ?? 20,
+            aiMonthlyLimit: data.ai_monthly_limit ?? 50,
+            maxStaff: data.max_staff ?? 50,
+            maxShifts: data.max_shifts ?? 20,
+            isActive: data.is_active ?? true,
+            companyLogo: data.company_logo ?? "",
+            skyopsLogo: data.skyops_logo ?? "",
+            preparedBy: data.prepared_by ?? "",
+            revisedBy: data.revised_by ?? "",
+          };
+          cachedProfile = profile;
+          profileFetchTime = Date.now();
+        } else {
+          // Check if a profile was pre-created by email
+          const { data: emailData } = await supabase
+            .from("user_profiles")
+            .select("*")
+            .eq("email", session.user.email)
+            .single();
+          if (emailData) {
+            // Update the ID to match the real auth ID
+            await supabase
+              .from("user_profiles")
+              .delete()
+              .eq("id", emailData.id); // Delete the temp one
+            await supabase.from("user_profiles").insert({
+              ...emailData,
+              id: session.user.id, // Insert with real ID
+            });
+            profile = {
+              id: session.user.id,
+              email: emailData.email,
+              role: emailData.role || "planner",
+              airport_id: emailData.airport_id,
+              aiDailyLimit: emailData.ai_daily_limit ?? 5,
+              aiWeeklyLimit: emailData.ai_weekly_limit ?? 20,
+              aiMonthlyLimit: emailData.ai_monthly_limit ?? 50,
+              maxStaff: emailData.max_staff ?? 50,
+              maxShifts: emailData.max_shifts ?? 20,
+              isActive: emailData.is_active ?? true,
+              companyLogo: emailData.company_logo ?? "",
+              skyopsLogo: emailData.skyops_logo ?? "",
+              preparedBy: emailData.prepared_by ?? "",
+              revisedBy: emailData.revised_by ?? "",
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("Could not fetch profile from DB", e);
+      }
+
+    // If no profile exists, create a default one
+    if (!profile) {
+      profile = {
+        id: session.user.id,
+        email: session.user.email,
+        role: "planner",
+        aiDailyLimit: 5,
+        aiWeeklyLimit: 20,
+        aiMonthlyLimit: 50,
+        maxStaff: 50,
+        maxShifts: 20,
+        isActive: true,
+        companyLogo: "",
+        skyopsLogo: "",
+        preparedBy: "Operation Control Center",
+        revisedBy: "",
+      };
+
+      try {
+        const { error } = await supabase.from("user_profiles").insert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
+        });
+        if (error) {
+          if (error.code === '23505') {
+            console.warn("Profile already exists (concurrent insert)");
+          } else {
+            console.warn("Could not insert profile to DB:", JSON.stringify(error));
+          }
+        }
+      } catch (e) {
+        console.warn("Exception during default profile creation:", e);
+      }
+    }
+
+    if (profile && profile.email === "safazoom@gmail.com" && profile.role !== "super_admin") {
+      profile.role = "super_admin";
+      try {
+        await supabase.from("user_profiles").update({ role: "super_admin" }).eq("id", profile.id);
+      } catch (e) {
+        console.warn("Failed to update safazoom to super_admin in DB:", e);
+      }
+    }
+
+    cachedProfile = profile;
+    profileFetchTime = Date.now();
+    return profile;
+  },
+
+  async getAllUserProfiles(): Promise<UserProfile[]> {
+    if (supabase) {
+      try {
+        const profile = await this.getUserProfile();
+        let query = supabase.from("user_profiles").select("*");
+        if (profile?.airport_id) {
+          query = query.eq("airport_id", profile.airport_id);
+        } else if (profile?.role !== "super_admin") {
+          const session = await auth.getSession();
+          query = query.eq("id", session?.user?.id || "");
+        }
+        
+        const { data, error } = await query;
+        if (error) {
+          console.warn("Supabase select error:", error);
+        }
+        if (data) {
+          return data.map((d: any) => ({
+            id: d.id,
+            email: d.email,
+            role: d.role,
+            airport_id: d.airport_id,
+            aiDailyLimit: d.ai_daily_limit,
+            aiWeeklyLimit: d.ai_weekly_limit,
+            aiMonthlyLimit: d.ai_monthly_limit,
+            maxStaff: d.max_staff,
+            maxShifts: d.max_shifts,
+            isActive: d.is_active,
+            companyLogo: d.company_logo ?? "",
+            skyopsLogo: d.skyops_logo ?? "",
+            preparedBy: d.prepared_by ?? "",
+            revisedBy: d.revised_by ?? "",
+          }));
+        }
+      } catch (e) {
+        console.warn("Could not fetch profiles from DB", e);
+      }
+    }
+    return [];
+  },
+
+  async updateUserProfile(profile: UserProfile) {
+    if (supabase) {
+      try {
+        const { error } = await supabase.from("user_profiles").upsert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          airport_id: profile.airport_id,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
+        });
+        if (error) console.warn("Could not update profile in DB:", error);
+      } catch (e) {
+        console.warn("Could not update profile in DB", e);
+      }
+    }
+  },
+
+  async deleteUserProfile(id: string) {
+    if (supabase) {
+      try {
+        await supabase.from("user_profiles").delete().eq("id", id);
+      } catch (e) {
+        console.warn("Could not delete profile from DB");
+      }
+    }
+  },
+
+  async createUserProfile(profile: UserProfile) {
+    if (supabase) {
+      try {
+        const { error } = await supabase.from("user_profiles").insert({
+          id: profile.id,
+          email: profile.email,
+          role: profile.role,
+          airport_id: profile.airport_id,
+          ai_daily_limit: profile.aiDailyLimit,
+          ai_weekly_limit: profile.aiWeeklyLimit,
+          ai_monthly_limit: profile.aiMonthlyLimit,
+          max_staff: profile.maxStaff,
+          max_shifts: profile.maxShifts,
+          is_active: profile.isActive,
+          company_logo: profile.companyLogo,
+          skyops_logo: profile.skyopsLogo,
+          prepared_by: profile.preparedBy,
+          revised_by: profile.revisedBy,
+        });
+        if (error) {
+          if (error.code === '23505') {
+            console.warn("Profile already exists (concurrent insert in createUserProfile)");
+          } else {
+            console.warn("Could not create user profile in DB:", JSON.stringify(error));
+          }
+        }
+      } catch (e) {
+        console.warn("Exception during create profile:", e);
+      }
+    }
+  },
+
+  async logAction(
+    actionType: AuditLog["actionType"],
+    entityType: AuditLog["entityType"],
+    entityId: string,
+    details: string,
+  ) {
+    const session = await auth.getSession();
+    if (!session) return;
+    const profile = await this.getUserProfile();
+
+    const log: AuditLog = {
+      id: crypto.randomUUID(),
+      userId: session.user.id,
+      userEmail: session.user.email,
+      actionType,
+      entityType,
+      entityId,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+
+    if (supabase) {
+      try {
+        await supabase.from("audit_logs").insert({
+          id: log.id,
+          user_id: log.userId,
+          airport_id: profile?.airport_id,
+          user_email: log.userEmail,
+          action_type: log.actionType,
+          entity_type: log.entityType,
+          entity_id: log.entityId,
+          details: log.details,
+          created_at: log.createdAt,
+        });
+      } catch (e) {
+        console.warn("Could not insert audit log to DB");
+      }
+    }
+  },
+
+  async getAirports(): Promise<Airport[]> {
+    if (!supabase) return [];
+    try {
+      const { data } = await supabase.from("airports").select("*").order("name");
+      return data || [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async getAirlines(): Promise<import("../types").Airline[]> {
+    if (!supabase) return [];
+    try {
+      const profile = await this.getUserProfile();
+      let query = supabase.from("airlines").select("*").order("name");
+      if (profile?.airport_id) {
+         query = query.eq("airport_id", profile.airport_id);
+      }
+      const { data } = await query;
+      return data || [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  async addAirline(airline: Omit<import("../types").Airline, "id">): Promise<void> {
+    if (!supabase) return;
+    try {
+      const profile = await this.getUserProfile();
+      await supabase.from("airlines").insert({
+        name: airline.name,
+        iata_code: airline.iata_code,
+        airport_id: profile?.airport_id,
+      });
+    } catch (e) {
+      console.warn("Could not insert airline");
+    }
+  },
+
+  async updateAirline(id: string, airline: Partial<import("../types").Airline>): Promise<void> {
+    if (!supabase) return;
+    try {
+      await supabase.from("airlines").update(airline).eq("id", id);
+    } catch (e) {
+      console.warn("Could not update airline");
+    }
+  },
+
+  async deleteAirline(id: string): Promise<void> {
+    if (!supabase) return;
+    try {
+      await supabase.from("airlines").delete().eq("id", id);
+    } catch (e) {
+      console.warn("Could not delete airline");
+    }
+  },
+
+  async getAuditLogs(): Promise<AuditLog[]> {
+    if (supabase) {
+      try {
+        const profile = await this.getUserProfile();
+        let query = supabase
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(500);
+          
+        if (profile?.airport_id) {
+          query = query.eq("airport_id", profile.airport_id);
+        } else if (profile?.role !== "super_admin") {
+          const session = await auth.getSession();
+          query = query.eq("user_id", session?.user?.id || "");
+        }
+
+        const { data } = await query;
+        if (data && data.length > 0) {
+          return data.map((d: any) => ({
+            id: d.id,
+            userId: d.user_id,
+            userEmail: d.user_email,
+            actionType: d.action_type,
+            entityType: d.entity_type,
+            entityId: d.entity_id,
+            details: d.details,
+            createdAt: d.created_at,
+          }));
+        }
+      } catch (e) {
+        console.warn("Could not fetch audit logs from DB");
+      }
+    }
+    return [];
+  },
+
+  async getAIGenerationCount(
+    userId: string,
+    period: "daily" | "weekly" | "monthly",
+  ): Promise<number> {
+    const logs = await this.getAuditLogs();
+    const now = new Date();
+    let startDate = new Date();
+
+    if (period === "daily") {
+      startDate.setHours(0, 0, 0, 0);
+    } else if (period === "weekly") {
+      const day = startDate.getDay();
+      const diff = startDate.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+      startDate.setDate(diff);
+      startDate.setHours(0, 0, 0, 0);
+    } else if (period === "monthly") {
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+    }
+
+    return logs.filter(
+      (l) =>
+        l.userId === userId &&
+        l.actionType === "GENERATE_AI" &&
+        new Date(l.createdAt) >= startDate,
+    ).length;
+  },
+
+  async exportDatabase() {
+    const data = await this.fetchAll();
+    if (!data) return null;
+    const versions = await this.getProgramVersions();
+    
+    const exportData = {
+      ...data,
+      program_versions: versions,
+      exportDate: new Date().toISOString()
+    };
+    return exportData;
+  },
+
+  async importDatabase(jsonData: string) {
+    try {
+      const data = JSON.parse(jsonData);
+      
+      // If there are flights, shifts, etc. save them
+      if (data.flights && data.flights.length > 0) {
+        for (const f of data.flights) await this.upsertFlight(f);
+      }
+      if (data.staff && data.staff.length > 0) {
+        for (const s of data.staff) await this.upsertStaff(s);
+      }
+      if (data.shifts && data.shifts.length > 0) {
+        for (const s of data.shifts) await this.upsertShift(s);
+      }
+      if (data.leave_requests && data.leave_requests.length > 0) {
+        await this.upsertLeaves(data.leave_requests);
+      }
+      if (data.incoming_duties && data.incoming_duties.length > 0) {
+        await this.upsertIncomingDuties(data.incoming_duties);
+      }
+      if (data.programs && data.programs.length > 0) {
+        await this.savePrograms(data.programs);
+      }
+      if (data.program_versions && data.program_versions.length > 0) {
+        for (const v of data.program_versions) await this.saveProgramVersion(v);
+      }
+      
+      this.logAction("IMPORT", "DATABASE", "all", "Imported full database backup");
+      return true;
+    } catch (e) {
+      console.warn("Failed to import database", e);
+      return false;
+    }
+  }
+};

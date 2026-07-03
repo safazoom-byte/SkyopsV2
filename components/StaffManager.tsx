@@ -1,0 +1,1328 @@
+import React, { useState, useMemo } from "react";
+import { Staff, Skill, StaffCategory } from "../types";
+import { AVAILABLE_SKILLS } from "../constants";
+import {
+  Users,
+  Edit2,
+  Trash2,
+  FileSpreadsheet,
+  User,
+  Plus,
+  Eraser,
+  ShieldCheck,
+  Sparkles,
+  Briefcase,
+  Shield,
+  CalendarRange,
+  Zap,
+  Search,
+  Power,
+  Plane,
+  HardHat,
+  Calculator,
+  Truck,
+} from "lucide-react";
+
+interface Props {
+  staff: Staff[];
+  onUpdate: (s: Staff) => void;
+  onDelete: (id: string) => void;
+  onClearAll?: () => void;
+  defaultMaxShifts: number;
+  onOpenScanner?: () => void;
+}
+
+export const StaffManager: React.FC<Props> = ({
+  staff = [],
+  onUpdate,
+  onDelete,
+  onClearAll,
+  defaultMaxShifts,
+  onOpenScanner,
+}) => {
+  const isTraffic = (s: Staff) =>
+    !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver;
+
+  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [viewMode, setViewMode] = useState<"grid" | "timeline">("grid");
+  const [categoryFilter, setCategoryFilter] = useState<
+    "all" | "traffic" | "security" | "labour" | "accountant" | "drivers"
+  >("all");
+  const [editingDuration, setEditingDuration] = useState<Staff | null>(null);
+  const [editPeriods, setEditPeriods] = useState<
+    { start: string; end: string }[]
+  >([]);
+
+  const getTimelineStyle = (start?: string, end?: string) => {
+    if (!start || !end) return { left: "0%", width: "100%" };
+    const s = new Date(start).getTime();
+    const e = new Date(end).getTime();
+    const yearStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+    const yearEnd = new Date(new Date().getFullYear(), 11, 31).getTime();
+
+    const left = Math.max(0, ((s - yearStart) / (yearEnd - yearStart)) * 100);
+    const right = Math.min(
+      100,
+      ((e - yearStart) / (yearEnd - yearStart)) * 100,
+    );
+    const width = Math.max(0.5, right - left);
+
+    return { left: `${left}%`, width: `${width}%` };
+  };
+
+  const [newStaff, setNewStaff] = useState<Partial<Staff>>({
+    name: "",
+    initials: "",
+    type: "Local",
+    powerRate: 75,
+    isRamp: false,
+    isShiftLeader: false,
+    isOps: false,
+    isLoadControl: false,
+    isLostFound: false,
+    isLabour: false,
+    isSecurity: false,
+    isDriver: false,
+    isAccountant: false,
+    workFromDate: "",
+    workToDate: "",
+  });
+
+  const generateInitials = (name: string) => {
+    if (!name) return "";
+    const parts = name.trim().split(/\s+/);
+    if (parts.length < 2) return parts[0]?.substring(0, 2).toUpperCase() || "";
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const formatStaffDate = (dateStr?: string) => {
+    if (!dateStr || dateStr === "N/A" || dateStr === "???") return "???";
+    let date: Date;
+    if (/^\d{5}$/.test(dateStr)) {
+      const serial = parseInt(dateStr);
+      date = new Date(0);
+      date.setTime(Math.round((serial - 25569) * 86400 * 1000));
+    } else {
+      date = new Date(dateStr + (dateStr.includes("T") ? "" : "T00:00:00Z"));
+    }
+    if (isNaN(date.getTime())) return dateStr;
+    return (
+      date.getUTCDate().toString().padStart(2, "0") +
+      "/" +
+      (date.getUTCMonth() + 1).toString().padStart(2, "0") +
+      "/" +
+      date.getUTCFullYear()
+    );
+  };
+
+  const filteredStaff = useMemo(() => {
+    let result = staff;
+    if (categoryFilter !== "all") {
+      if (categoryFilter === "traffic") result = result.filter(isTraffic);
+      else if (categoryFilter === "security")
+        result = result.filter((s) => s.isSecurity);
+      else if (categoryFilter === "labour")
+        result = result.filter((s) => s.isLabour);
+      else if (categoryFilter === "accountant")
+        result = result.filter((s) => s.isAccountant);
+      else if (categoryFilter === "drivers")
+        result = result.filter((s) => s.isDriver);
+    }
+    if (!searchTerm) return result;
+    const lower = searchTerm.toLowerCase();
+    return result.filter(
+      (s) =>
+        s.name.toLowerCase().includes(lower) ||
+        s.initials.toLowerCase().includes(lower) ||
+        s.type.toLowerCase().includes(lower),
+    );
+  }, [staff, searchTerm, categoryFilter]);
+
+  const handleNewStaffSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newStaff.name) return;
+    const initials = (
+      newStaff.initials || generateInitials(newStaff.name)
+    ).toUpperCase();
+
+    // --- IMPROVEMENT 3: DUPLICATE INITIALS WARNING ---
+    if (staff.some((s) => s.initials.toUpperCase() === initials)) {
+      alert(
+        `Warning: The initials "${initials}" are already in use. Please use unique initials.`,
+      );
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    const isRoster = newStaff.type === "Roster";
+
+    // Validate dates if Roster
+    if (isRoster && (!newStaff.workFromDate || !newStaff.workToDate)) {
+      alert("Please specify Contract Start and End dates for Roster staff.");
+      return;
+    }
+
+    const staffData: Staff = {
+      id,
+      name: newStaff.name,
+      initials,
+      type: (newStaff.type as StaffCategory) || "Local",
+      workPattern: isRoster ? "Continuous (Roster)" : "5 Days On / 2 Off",
+      isActive: true,
+      powerRate: Number(newStaff.powerRate) || 75,
+      isRamp: !!newStaff.isRamp,
+      isShiftLeader: !!newStaff.isShiftLeader,
+      isOps: !!newStaff.isOps,
+      isLoadControl: !!newStaff.isLoadControl,
+      isLostFound: !!newStaff.isLostFound,
+      isLabour: !!newStaff.isLabour,
+      isSecurity: !!newStaff.isSecurity,
+      isDriver: !!newStaff.isDriver,
+      isAccountant: !!newStaff.isAccountant,
+      maxShiftsPerWeek: defaultMaxShifts,
+      workFromDate: isRoster ? newStaff.workFromDate : undefined,
+      workToDate: isRoster ? newStaff.workToDate : undefined,
+      rosterPeriods: isRoster
+        ? [
+            {
+              start: newStaff.workFromDate || "",
+              end: newStaff.workToDate || "",
+            },
+          ]
+        : undefined,
+    };
+    onUpdate(staffData);
+    setNewStaff({
+      name: "",
+      initials: "",
+      type: "Local",
+      powerRate: 75,
+      isRamp: false,
+      isShiftLeader: false,
+      isOps: false,
+      isLoadControl: false,
+      isLostFound: false,
+      isLabour: false,
+      isSecurity: false,
+      isDriver: false,
+      isAccountant: false,
+      workFromDate: "",
+      workToDate: "",
+    });
+  };
+
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    isEdit: boolean,
+  ) => {
+    const { name, value } = e.target;
+    const finalValue = name === "powerRate" ? parseInt(value, 10) || 75 : value;
+    if (isEdit) {
+      if (!editingStaff) return;
+      setEditingStaff((prev) => {
+        if (!prev) return null;
+        const update: any = { [name]: finalValue };
+        if (name === "type") {
+          update.workPattern =
+            finalValue === "Roster"
+              ? "Continuous (Roster)"
+              : "5 Days On / 2 Off";
+          if (finalValue === "Local") {
+            update.workFromDate = undefined;
+            update.workToDate = undefined;
+          }
+        }
+        return { ...prev, ...update };
+      });
+    } else {
+      setNewStaff((prev) => {
+        const update: any = { [name]: finalValue };
+        if (name === "type") {
+          update.workPattern =
+            finalValue === "Roster"
+              ? "Continuous (Roster)"
+              : "5 Days On / 2 Off";
+          if (finalValue === "Local") {
+            update.workFromDate = "";
+            update.workToDate = "";
+          }
+        }
+        return { ...prev, ...update };
+      });
+    }
+  };
+
+  const toggleSkill = (skill: Skill, isEdit: boolean) => {
+    const skillMap: Record<Skill, keyof Staff> = {
+      Ramp: "isRamp",
+      "Load Control": "isLoadControl",
+      "Lost and Found": "isLostFound",
+      "Shift Leader": "isShiftLeader",
+      Operations: "isOps",
+      Labour: "isLabour",
+      Security: "isSecurity",
+      Driver: "isDriver",
+      Accountant: "isAccountant",
+    };
+    const field = skillMap[skill];
+    if (!field) return;
+
+    const exclusiveSkills: (keyof Staff)[] = [
+      "isDriver",
+      "isLabour",
+      "isSecurity",
+      "isAccountant",
+    ];
+    const allSkills = Object.values(skillMap);
+
+    const updateState = (currentState: any) => {
+      const newValue = !currentState[field];
+      const nextState = { ...currentState, [field]: newValue };
+
+      if (newValue) {
+        if (exclusiveSkills.includes(field)) {
+          // If turning ON an exclusive skill, turn OFF all other skills
+          allSkills.forEach((s) => {
+            if (s !== field) nextState[s] = false;
+          });
+        } else {
+          // If turning ON a normal skill, turn OFF all exclusive skills
+          exclusiveSkills.forEach((s) => {
+            nextState[s] = false;
+          });
+        }
+      }
+      return nextState;
+    };
+
+    if (isEdit) {
+      if (!editingStaff) return;
+      setEditingStaff(updateState(editingStaff));
+    } else {
+      setNewStaff(updateState(newStaff));
+    }
+  };
+
+  const isSkillActive = (member: any, skill: Skill) => {
+    const skillMap: Record<Skill, string> = {
+      Ramp: "isRamp",
+      "Load Control": "isLoadControl",
+      "Lost and Found": "isLostFound",
+      "Shift Leader": "isShiftLeader",
+      Operations: "isOps",
+      Labour: "isLabour",
+      Security: "isSecurity",
+      Driver: "isDriver",
+      Accountant: "isAccountant",
+    };
+    const field = skillMap[skill];
+    return !!member[field];
+  };
+
+  const exportStaffCSV = async () => {
+    if (!staff || !staff.length) return;
+    const data = staff.map((s) => ({
+      "Full Name": s.name,
+      Initials: s.initials,
+      Category: s.type,
+      "Power Rate": `${s.powerRate}%`,
+      "Work Pattern": s.workPattern.split("|")[0],
+      "From Date": s.type === "Roster" ? s.workFromDate || "N/A" : "Permanent",
+      "To Date": s.type === "Roster" ? s.workToDate || "N/A" : "Permanent",
+      Ramp: s.isRamp ? "Yes" : "No",
+      "Load Control": s.isLoadControl ? "Yes" : "No",
+      "Lost and Found": s.isLostFound ? "Yes" : "No",
+      "Shift Leader": s.isShiftLeader ? "Yes" : "No",
+      Operations: s.isOps ? "Yes" : "No",
+      Labour: s.isLabour ? "Yes" : "No",
+      Security: s.isSecurity ? "Yes" : "No",
+      Driver: s.isDriver ? "Yes" : "No",
+      Accountant: s.isAccountant ? "Yes" : "No",
+    }));
+    const XLSX = await import("xlsx");
+    const worksheet = XLSX.utils.json_to_sheet(data);
+
+    // Auto-fit columns
+    if (data.length > 0) {
+      const keys = Object.keys(data[0]);
+      const objectMaxLength = keys.map((key) => key.length);
+
+      for (let i = 0; i < data.length; i++) {
+        const values = Object.values(data[i]);
+        for (let j = 0; j < values.length; j++) {
+          const valLen = values[j] ? values[j].toString().length : 0;
+          if (valLen > objectMaxLength[j]) {
+            objectMaxLength[j] = valLen;
+          }
+        }
+      }
+
+      const wscols = objectMaxLength.map((w) => ({ width: w + 2 }));
+      worksheet["!cols"] = wscols;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "ManPower");
+    XLSX.writeFile(workbook, "SkyOPS_ManPower_Registry.xlsx");
+  };
+
+  const getStats = (filterFn: (s: Staff) => boolean) => {
+    const list = staff.filter(filterFn);
+    return {
+      active: list.filter((s) => s.isActive !== false).length,
+      inactive: list.filter((s) => s.isActive === false).length,
+      total: list.length,
+    };
+  };
+
+  const personnelStats = [
+    {
+      id: "all" as const,
+      label: "All Personnel",
+      icon: <Users size={20} />,
+      stats: getStats((s) => true),
+      color: "text-slate-600",
+      border: "border-slate-200",
+      bg: "bg-slate-50",
+    },
+    {
+      id: "traffic" as const,
+      label: "Normal (Traffic)",
+      icon: <Plane size={20} />,
+      stats: getStats((s) => isTraffic(s)),
+      color: "text-blue-600",
+      border: "border-blue-200",
+      bg: "bg-blue-50",
+    },
+    {
+      id: "security" as const,
+      label: "Security",
+      icon: <Shield size={20} />,
+      stats: getStats((s) => s.isSecurity),
+      color: "text-purple-600",
+      border: "border-purple-200",
+      bg: "bg-purple-50",
+    },
+    {
+      id: "labour" as const,
+      label: "Labour",
+      icon: <HardHat size={20} />,
+      stats: getStats((s) => s.isLabour),
+      color: "text-rose-600",
+      border: "border-rose-200",
+      bg: "bg-rose-50",
+    },
+    {
+      id: "accountant" as const,
+      label: "Accountant",
+      icon: <Calculator size={20} />,
+      stats: getStats((s) => s.isAccountant),
+      color: "text-emerald-600",
+      border: "border-emerald-200",
+      bg: "bg-emerald-50",
+    },
+    {
+      id: "drivers" as const,
+      label: "Drivers",
+      icon: <Truck size={20} />,
+      stats: getStats((s) => s.isDriver),
+      color: "text-amber-600",
+      border: "border-amber-200",
+      bg: "bg-amber-50",
+    },
+  ];
+
+  return (
+    <div className="space-y-8 md:space-y-12 pb-12 md:pb-24 animate-in fade-in duration-500">
+      <div className="bg-slate-950 text-white p-6 md:p-14 rounded-3xl md:rounded-[3.5rem] shadow-2xl flex flex-col md:flex-row justify-between items-center gap-6 md:gap-8 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/10 blur-[100px] pointer-events-none"></div>
+        <div className="flex items-center gap-6 md:gap-8 relative z-10 flex-col md:flex-row text-center md:text-left">
+          <div className="w-16 h-16 md:w-20 md:h-20 bg-blue-600 rounded-2xl md:rounded-[2rem] flex items-center justify-center shadow-2xl shadow-blue-600/40 border-4 border-white/5">
+            <Users size={28} className="md:w-9 md:h-9" />
+          </div>
+          <div>
+            <h3 className="text-2xl md:text-4xl font-black uppercase italic tracking-tighter text-white">
+              Personnel Control
+            </h3>
+            <p className="text-slate-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.3em] mt-1 md:mt-2 flex items-center justify-center md:justify-start gap-2">
+              <ShieldCheck size={14} className="text-emerald-500" />{" "}
+              {staff.length} Total Registered Agents
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto relative z-10">
+          <button
+            onClick={exportStaffCSV}
+            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-2xl font-black uppercase text-[9px] md:text-[10px] flex items-center justify-center gap-3 transition-all"
+          >
+            <FileSpreadsheet size={18} /> Export
+          </button>
+          <button
+            onClick={() => setShowWipeConfirm(true)}
+            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-rose-600/10 border border-rose-500/20 hover:bg-rose-600 hover:text-white text-rose-500 rounded-2xl font-black uppercase text-[9px] md:text-[10px] flex items-center justify-center gap-3 transition-all"
+          >
+            <Eraser size={18} /> Wipe
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {personnelStats.map((stat) => {
+          const isActive = categoryFilter === stat.id;
+          return (
+            <button
+              key={stat.id}
+              onClick={() => setCategoryFilter(isActive ? "all" : stat.id)}
+              className={`text-left bg-white border ${isActive ? "ring-2 ring-blue-500 shadow-md transform scale-105" : "ring-0 shadow-sm"} ${stat.border} rounded-3xl p-5 hover:shadow-md transition-all relative overflow-hidden group focus:outline-none`}
+            >
+              <div
+                className={`absolute top-0 right-0 w-24 h-24 ${stat.bg} rounded-bl-full -z-10 opacity-50 group-hover:scale-110 transition-transform ${isActive ? "scale-110 opacity-70" : ""}`}
+              ></div>
+              <div className="flex items-center gap-3 mb-4">
+                <div
+                  className={`w-10 h-10 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center`}
+                >
+                  {stat.icon}
+                </div>
+                <h4
+                  className={`text-[10px] md:text-xs font-black uppercase tracking-wider ${isActive ? "text-blue-700" : "text-slate-700"} leading-tight`}
+                >
+                  {stat.label}
+                </h4>
+              </div>
+
+              <div className="flex items-end justify-between">
+                <div>
+                  <div className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">
+                    {stat.stats.total}
+                  </div>
+                  <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                    Total
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 items-end">
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md">
+                    <ShieldCheck size={10} />
+                    {stat.stats.active} Active
+                  </div>
+                  {stat.stats.inactive > 0 && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded-md">
+                      <Power size={10} />
+                      {stat.stats.inactive} Inactive
+                    </div>
+                  )}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white p-6 md:p-14 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100">
+          <h4 className="text-lg md:text-2xl font-black italic uppercase mb-8 flex items-center gap-4 text-slate-900">
+            <Plus className="text-blue-600" size={24} /> Register New Personnel
+          </h4>
+          <form
+            onSubmit={handleNewStaffSubmit}
+            className="space-y-8 md:space-y-10"
+          >
+            <div className="grid grid-cols-1 gap-4 md:gap-8">
+              <div className="space-y-2">
+                <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User
+                    className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 text-slate-300"
+                    size={16}
+                  />
+                  <input
+                    type="text"
+                    name="name"
+                    className="w-full pl-12 md:pl-14 pr-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm text-slate-900 outline-none transition-all"
+                    value={newStaff.name}
+                    onChange={(e) => handleInputChange(e, false)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                    Initials
+                  </label>
+                  <input
+                    type="text"
+                    name="initials"
+                    className="w-full px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-black text-xs md:text-sm uppercase outline-none text-slate-900"
+                    value={newStaff.initials}
+                    onChange={(e) => handleInputChange(e, false)}
+                    placeholder="Auto-gen"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                    Category
+                  </label>
+                  <select
+                    name="type"
+                    className="w-full px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] font-bold text-xs md:text-sm text-slate-900 outline-none appearance-none"
+                    value={newStaff.type}
+                    onChange={(e) => handleInputChange(e, false)}
+                  >
+                    <option value="Local">Local (Permanent 5/2)</option>
+                    <option value="Roster">Roster (Contract-Based)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 flex justify-between">
+                    <span>Power Rate</span>
+                    <span className="text-blue-600">{newStaff.powerRate}%</span>
+                  </label>
+                  <div className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center">
+                    <input
+                      type="range"
+                      name="powerRate"
+                      min="50"
+                      max="100"
+                      className="w-full accent-blue-600 cursor-pointer h-1.5"
+                      value={newStaff.powerRate}
+                      onChange={(e) => handleInputChange(e, false)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {newStaff.type === "Roster" && (
+                <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 p-4 bg-amber-50 rounded-3xl border border-amber-100">
+                  <div className="space-y-2">
+                    <label className="block text-[8px] md:text-[10px] font-black text-amber-600 uppercase tracking-widest ml-1 flex items-center gap-2">
+                      <CalendarRange size={12} /> Contract Start
+                    </label>
+                    <input
+                      type="date"
+                      name="workFromDate"
+                      className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none"
+                      value={newStaff.workFromDate}
+                      onChange={(e) => handleInputChange(e, false)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-[8px] md:text-[10px] font-black text-amber-600 uppercase tracking-widest ml-1 flex items-center gap-2">
+                      <CalendarRange size={12} /> Contract End
+                    </label>
+                    <input
+                      type="date"
+                      name="workToDate"
+                      className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none"
+                      value={newStaff.workToDate}
+                      onChange={(e) => handleInputChange(e, false)}
+                      required
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-4 pt-6 border-t border-slate-50">
+                <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex flex-col gap-1">
+                  <span>Discipline Matrix</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">
+                    Note: Security role only performs security tasks and is
+                    assigned upon request.
+                  </span>
+                </p>
+                <div className="flex flex-wrap gap-2 md:gap-3">
+                  {AVAILABLE_SKILLS.map((skill) => {
+                    const active = isSkillActive(newStaff, skill);
+                    return (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => toggleSkill(skill, false)}
+                        className={`px-4 md:px-8 py-3 md:py-4 rounded-xl md:rounded-2xl text-[8px] md:text-[10px] font-black uppercase transition-all border-2 ${active ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-600/20" : "bg-white border-slate-100 text-slate-500"}`}
+                      >
+                        {skill}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="w-full py-5 md:py-6 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.3em] shadow-2xl hover:bg-blue-600 text-[10px] md:text-xs transition-all active:scale-95"
+              >
+                Commit To Station Registry
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20">
+        <div className="flex items-center flex-1 bg-slate-50 rounded-2xl px-4 py-2 border border-slate-100">
+          <Search className="text-slate-400 mr-3" size={20} />
+          <input
+            type="text"
+            placeholder="Search personnel by name, initials, or type..."
+            className="flex-1 bg-transparent font-bold text-sm text-slate-900 outline-none placeholder:text-slate-300 placeholder:font-medium py-2"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm("")}
+              className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex bg-slate-100 p-1.5 rounded-2xl shrink-0">
+          <button
+            onClick={() => setViewMode("grid")}
+            className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === "grid" ? "bg-white shadow-sm text-blue-600" : "text-slate-400 hover:text-slate-600"}`}
+          >
+            Grid
+          </button>
+          <button
+            onClick={() => setViewMode("timeline")}
+            className={`flex-1 md:flex-none px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === "timeline" ? "bg-white shadow-sm text-blue-600" : "text-slate-400 hover:text-slate-600"}`}
+          >
+            Timeline
+          </button>
+        </div>
+      </div>
+
+      {viewMode === "grid" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-8">
+          {filteredStaff.length === 0 ? (
+            <div className="col-span-full py-20 md:py-32 text-center bg-slate-100/50 rounded-3xl md:rounded-[4rem] border-2 border-dashed border-slate-200">
+              <Users size={48} className="mx-auto text-slate-200 mb-4" />
+              <h4 className="text-lg font-black uppercase italic text-slate-300">
+                {searchTerm ? "No Matching Personnel" : "Station Ranks Empty"}
+              </h4>
+            </div>
+          ) : (
+            filteredStaff.map((member) => {
+              const power = member.powerRate || 75;
+              const isRoster = member.type === "Roster";
+              return (
+                <div
+                  key={member.id}
+                  className={`bg-white rounded-3xl md:rounded-[4rem] shadow-sm border p-0 group hover:shadow-xl transition-all relative overflow-hidden flex flex-col ${member.isActive === false ? "opacity-60 bg-slate-50 border-slate-200" : "border-slate-100"}`}
+                >
+                  <div
+                    className={`h-20 md:h-24 px-6 md:px-8 flex items-center justify-between ${member.isActive === false ? "bg-slate-200/40" : isRoster ? "bg-amber-500/10" : "bg-blue-600/5"}`}
+                  >
+                    <div className="flex items-center gap-3 md:gap-4 overflow-hidden">
+                      <div className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-xl md:rounded-2xl flex items-center justify-center shadow-sm text-slate-950 font-black italic text-lg md:text-xl border border-slate-100 shrink-0">
+                        {member.initials}
+                      </div>
+                      <div className="min-w-0">
+                        <h5 className="text-xs md:text-sm font-black text-slate-900 leading-tight truncate">
+                          {member.name}
+                        </h5>
+                        <span
+                          className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${member.isActive === false ? "text-rose-500" : isRoster ? "text-amber-600" : "text-blue-600"}`}
+                        >
+                          {member.isActive === false
+                            ? "DEACTIVATED"
+                            : `${member.type} AGENT`}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="relative w-10 h-10 md:w-12 md:h-12 flex items-center justify-center shrink-0">
+                      <svg className="w-full h-full -rotate-90">
+                        <circle
+                          cx="20"
+                          cy="20"
+                          r="16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          className="text-slate-100 md:hidden"
+                        />
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r="20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          className="hidden md:block text-slate-100"
+                        />
+
+                        <circle
+                          cx="20"
+                          cy="20"
+                          r="16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="3"
+                          strokeDasharray="100.48"
+                          strokeDashoffset={100.48 - (100.48 * power) / 100}
+                          className={`md:hidden ${isRoster ? "text-amber-500" : "text-blue-600"}`}
+                        />
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r="20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          strokeDasharray="125.6"
+                          strokeDashoffset={125.6 - (125.6 * power) / 100}
+                          className={`hidden md:block ${isRoster ? "text-amber-500" : "text-blue-600"}`}
+                        />
+                      </svg>
+                      <span className="absolute text-[7px] md:text-[8px] font-black">
+                        {power}%
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-6 md:p-8 flex-1 flex flex-col justify-between space-y-6 md:space-y-8">
+                    <div className="space-y-4 md:space-y-6">
+                      <div className="flex items-center gap-3 text-slate-400">
+                        <Briefcase size={12} />
+                        <span className="text-[8px] md:text-[9px] font-black uppercase tracking-widest">
+                          {member.workPattern.split("|")[0]}
+                        </span>
+                      </div>
+
+                      {isRoster && (
+                        <div className="p-3 md:p-4 bg-slate-50 rounded-xl md:rounded-2xl border border-slate-100 space-y-2">
+                          <div className="flex justify-between items-center text-[7px] md:text-[8px] font-black uppercase">
+                            <span className="text-slate-600">WINDOW</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[9px] md:text-[10px] font-black italic">
+                            <span>{formatStaffDate(member.workFromDate)}</span>
+                            <span className="text-slate-300">→</span>
+                            <span>{formatStaffDate(member.workToDate)}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2 md:space-y-3">
+                        <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                          <Shield size={10} className="text-indigo-400" />{" "}
+                          Qualifications
+                        </p>
+                        <div className="flex flex-wrap gap-1 md:gap-1.5">
+                          {AVAILABLE_SKILLS.filter((s) =>
+                            isSkillActive(member, s),
+                          ).map((s) => (
+                            <span
+                              key={s}
+                              className="px-2 md:px-3 py-1 md:py-1.5 bg-slate-900 text-white rounded-lg text-[7px] md:text-[8px] font-black uppercase tracking-tight"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setEditingStaff(member)}
+                        className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-xl md:rounded-2xl font-black uppercase text-[8px] md:text-[9px] flex items-center justify-center gap-2 hover:bg-blue-600 transition-all"
+                      >
+                        <Edit2 size={12} /> REFINE
+                      </button>
+                      <button
+                        onClick={() => {
+                          onUpdate({
+                            ...member,
+                            isActive: member.isActive === false ? true : false,
+                          });
+                        }}
+                        className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center transition-all shrink-0 ${member.isActive === false ? "bg-emerald-100 text-emerald-600 hover:bg-emerald-500 hover:text-white" : "bg-slate-100 text-slate-500 hover:bg-red-500 hover:text-white"}`}
+                        title={
+                          member.isActive === false
+                            ? "Activate member"
+                            : "Deactivate member"
+                        }
+                      >
+                        <Power size={16} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (
+                            confirm(
+                              "Are you sure you want to delete this employee?",
+                            )
+                          )
+                            onDelete(member.id);
+                        }}
+                        className="w-10 h-10 md:w-14 md:h-14 bg-rose-50 text-rose-500 rounded-xl md:rounded-2xl flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shrink-0"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-[2rem] md:rounded-[3rem] shadow-sm border border-slate-100 overflow-hidden flex flex-col animate-in fade-in">
+          <div className="p-4 md:p-8 border-b border-slate-100 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-slate-50/50">
+            <h4 className="text-sm md:text-lg font-black uppercase italic text-slate-800">
+              Duration Matrix (Current Year)
+            </h4>
+            <div className="flex gap-3 text-[8px] md:text-[9px] font-black uppercase tracking-widest text-slate-400">
+              <span className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-amber-400"></div> Roster
+              </span>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="min-w-[800px] p-6 md:p-8 space-y-4">
+              {/* Months Header */}
+              <div className="flex ml-[200px] mb-4 border-b border-slate-100 pb-2">
+                {[
+                  "Jan",
+                  "Feb",
+                  "Mar",
+                  "Apr",
+                  "May",
+                  "Jun",
+                  "Jul",
+                  "Aug",
+                  "Sep",
+                  "Oct",
+                  "Nov",
+                  "Dec",
+                ].map((m) => (
+                  <div
+                    key={m}
+                    className="flex-1 text-[9px] font-black text-slate-400 uppercase tracking-widest text-center"
+                  >
+                    {m}
+                  </div>
+                ))}
+              </div>
+
+              {filteredStaff.filter((s) => s.type === "Roster").length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs font-black uppercase tracking-widest">
+                  No roster personnel found
+                </div>
+              ) : (
+                filteredStaff
+                  .filter((s) => s.type === "Roster")
+                  .map((member) => {
+                    const periods = member.rosterPeriods?.length
+                      ? member.rosterPeriods
+                      : [
+                          {
+                            start: member.workFromDate,
+                            end: member.workToDate,
+                          },
+                        ];
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center gap-4 group"
+                      >
+                        <div className="w-[184px] shrink-0 flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-black bg-amber-100 text-amber-700">
+                            {member.initials}
+                          </div>
+                          <div className="truncate">
+                            <div className="text-xs font-black text-slate-900 truncate">
+                              {member.name}
+                            </div>
+                            <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest">
+                              {member.type}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 h-10 bg-slate-50 rounded-xl relative overflow-hidden border border-slate-100">
+                          {/* Grid lines */}
+                          <div className="absolute inset-0 flex">
+                            {Array.from({ length: 12 }).map((_, i) => (
+                              <div
+                                key={i}
+                                className="flex-1 border-r border-slate-100/50 last:border-0"
+                              ></div>
+                            ))}
+                          </div>
+
+                          {/* Bars */}
+                          {periods.map((period, idx) => {
+                            const style = getTimelineStyle(
+                              period.start,
+                              period.end,
+                            );
+                            return (
+                              <div
+                                key={idx}
+                                className="absolute top-2 bottom-2 rounded-md transition-all duration-500 bg-amber-400 cursor-pointer hover:brightness-110 shadow-sm"
+                                style={style}
+                                onClick={() => {
+                                  setEditingDuration(member);
+                                  setEditPeriods(
+                                    member.rosterPeriods?.length
+                                      ? [...member.rosterPeriods]
+                                      : [
+                                          {
+                                            start: member.workFromDate || "",
+                                            end: member.workToDate || "",
+                                          },
+                                        ],
+                                  );
+                                }}
+                              >
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span className="text-[8px] font-black text-amber-900 uppercase tracking-widest bg-white/50 px-2 py-0.5 rounded backdrop-blur-sm">
+                                    Edit
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingDuration && (
+        <div className="fixed inset-0 z-[2000] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-t-[2rem] md:rounded-[2rem] shadow-2xl w-full max-w-md p-6 pb-8 md:p-8 animate-in slide-in-from-bottom-4 md:zoom-in-95 max-h-[90vh] overflow-y-auto no-scrollbar">
+            <h4 className="text-lg font-black uppercase italic text-slate-900 mb-6 flex items-center gap-3">
+              <CalendarRange className="text-amber-500" /> Edit Roster Periods
+            </h4>
+            <div className="flex items-center gap-3 mb-6 p-3 bg-amber-50 rounded-xl border border-amber-100">
+              <div className="w-10 h-10 bg-amber-200 text-amber-700 rounded-lg flex items-center justify-center font-black">
+                {editingDuration.initials}
+              </div>
+              <div>
+                <div className="text-sm font-black text-slate-900">
+                  {editingDuration.name}
+                </div>
+                <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest">
+                  Roster Agent
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              {editPeriods.map((period, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl relative group"
+                >
+                  <div className="flex-1">
+                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block">
+                      Start
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs outline-none focus:border-amber-400"
+                      value={period.start}
+                      onChange={(e) => {
+                        const newPeriods = [...editPeriods];
+                        newPeriods[idx].start = e.target.value;
+                        setEditPeriods(newPeriods);
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block">
+                      End
+                    </label>
+                    <input
+                      type="date"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs outline-none focus:border-amber-400"
+                      value={period.end}
+                      onChange={(e) => {
+                        const newPeriods = [...editPeriods];
+                        newPeriods[idx].end = e.target.value;
+                        setEditPeriods(newPeriods);
+                      }}
+                    />
+                  </div>
+                  {editPeriods.length > 1 && (
+                    <button
+                      onClick={() =>
+                        setEditPeriods(editPeriods.filter((_, i) => i !== idx))
+                      }
+                      className="w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all shrink-0 mt-4"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() =>
+                setEditPeriods([...editPeriods, { start: "", end: "" }])
+              }
+              className="w-full py-3 mb-8 border-2 border-dashed border-slate-200 text-slate-500 rounded-xl font-black uppercase text-[10px] tracking-widest hover:border-amber-400 hover:text-amber-600 transition-all flex items-center justify-center gap-2"
+            >
+              <Plus size={14} /> Add Another Period
+            </button>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setEditingDuration(null)}
+                className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const validPeriods = editPeriods.filter(
+                    (p) => p.start && p.end,
+                  );
+                  if (validPeriods.length === 0) {
+                    alert("Please add at least one valid period.");
+                    return;
+                  }
+                  const starts = validPeriods.map((p) => p.start).sort();
+                  const ends = validPeriods.map((p) => p.end).sort();
+
+                  onUpdate({
+                    ...editingDuration,
+                    rosterPeriods: validPeriods,
+                    workFromDate: starts[0],
+                    workToDate: ends[ends.length - 1],
+                  });
+                  setEditingDuration(null);
+                }}
+                className="flex-[2] py-3 bg-amber-500 text-slate-900 rounded-xl font-black uppercase italic tracking-widest hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20"
+              >
+                Save Periods
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingStaff && (
+        <div className="fixed inset-0 z-[1600] flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-950/90 backdrop-blur-md">
+          <div className="bg-white rounded-t-[2.5rem] md:rounded-[4rem] shadow-2xl max-w-xl w-full p-6 pb-8 md:p-12 overflow-y-auto max-h-[90vh] md:max-h-[95vh] no-scrollbar animate-in slide-in-from-bottom-4 md:zoom-in-95">
+            <h4 className="text-xl md:text-2xl font-black uppercase italic mb-6 md:mb-10 flex items-center gap-4">
+              <Edit2 className="text-indigo-600" /> Refine Profile
+            </h4>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                // --- IMPROVEMENT 3: DUPLICATE INITIALS WARNING (EDIT) ---
+                const initials = editingStaff.initials.toUpperCase();
+                if (
+                  staff.some(
+                    (s) =>
+                      s.id !== editingStaff.id &&
+                      s.initials.toUpperCase() === initials,
+                  )
+                ) {
+                  alert(
+                    `Warning: The initials "${initials}" are already in use by another staff member.`,
+                  );
+                  return;
+                }
+                onUpdate(editingStaff);
+                setEditingStaff(null);
+              }}
+              className="space-y-6 md:space-y-8"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+                <div>
+                  <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold text-xs text-slate-900"
+                    value={editingStaff.name}
+                    onChange={(e) => handleInputChange(e, true)}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                    Initials
+                  </label>
+                  <input
+                    type="text"
+                    name="initials"
+                    className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-black uppercase text-xs text-slate-900"
+                    value={editingStaff.initials}
+                    onChange={(e) => handleInputChange(e, true)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
+                <select
+                  name="type"
+                  className="w-full px-5 py-4 bg-slate-50 border rounded-2xl font-bold appearance-none text-xs text-slate-900"
+                  value={editingStaff.type}
+                  onChange={(e) => handleInputChange(e, true)}
+                >
+                  <option value="Local">Local (Permanent)</option>
+                  <option value="Roster">Roster (Contract)</option>
+                </select>
+                <div className="px-5 py-4 bg-slate-50 border rounded-2xl flex items-center">
+                  <input
+                    type="range"
+                    name="powerRate"
+                    min="50"
+                    max="100"
+                    className="w-full accent-indigo-600"
+                    value={editingStaff.powerRate}
+                    onChange={(e) => handleInputChange(e, true)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                  Roster Status
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingStaff({
+                        ...editingStaff,
+                        isActive:
+                          editingStaff.isActive !== false ? false : true,
+                      })
+                    }
+                    className={`px-5 py-4 border rounded-2xl flex-1 font-black text-xs flex items-center justify-center gap-2 transition-all ${editingStaff.isActive !== false ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"}`}
+                  >
+                    <Power size={14} />
+                    {editingStaff.isActive !== false
+                      ? "ACTIVE ON ROSTER"
+                      : "DEACTIVATED"}
+                  </button>
+                </div>
+              </div>
+
+              {editingStaff.type === "Roster" && (
+                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-4">
+                  <div>
+                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                      From
+                    </label>
+                    <input
+                      type="date"
+                      name="workFromDate"
+                      className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900"
+                      value={editingStaff.workFromDate || ""}
+                      onChange={(e) => handleInputChange(e, true)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
+                      To
+                    </label>
+                    <input
+                      type="date"
+                      name="workToDate"
+                      className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900"
+                      value={editingStaff.workToDate || ""}
+                      onChange={(e) => handleInputChange(e, true)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase flex flex-col gap-1">
+                  <span>Discipline Access</span>
+                  <span className="text-[8px] font-medium text-slate-400 normal-case">
+                    Note: Security role only performs security tasks and is
+                    assigned upon request.
+                  </span>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_SKILLS.map((skill) => {
+                    const active = isSkillActive(editingStaff, skill);
+                    return (
+                      <button
+                        key={skill}
+                        type="button"
+                        onClick={() => toggleSkill(skill, true)}
+                        className={`px-4 py-2.5 rounded-xl text-[8px] md:text-[9px] font-black uppercase transition-all border ${active ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-500"}`}
+                      >
+                        {skill}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingStaff(null)}
+                  className="flex-1 py-4 text-[9px] md:text-[10px] font-black uppercase text-slate-400"
+                >
+                  Discard
+                </button>
+                <button
+                  type="submit"
+                  className="flex-[2] py-4 bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-[0.2em] transition-all text-xs"
+                >
+                  Apply Refinement
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showWipeConfirm && (
+        <div className="fixed inset-0 z-[1700] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md">
+          <div className="bg-white rounded-3xl md:rounded-[4rem] shadow-2xl max-w-sm w-full p-8 md:p-12 text-center">
+            <ShieldCheck size={48} className="mx-auto text-rose-500 mb-6" />
+            <h4 className="text-xl md:text-2xl font-black uppercase italic mb-3">
+              Registry Purge
+            </h4>
+            <p className="text-[10px] md:text-xs text-slate-500 mb-8">
+              Permanently erase all personnel data?
+            </p>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setShowWipeConfirm(false)}
+                className="flex-1 py-4 text-[9px] md:text-[10px] font-black uppercase text-slate-400"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  onClearAll?.();
+                  setShowWipeConfirm(false);
+                }}
+                className="flex-[2] py-4 bg-rose-600 text-white rounded-2xl font-black uppercase text-[10px] md:text-xs transition-all"
+              >
+                Confirm Wipe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
