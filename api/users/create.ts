@@ -27,8 +27,29 @@ export default async function handler(req: any, res: any) {
     
     const { email, password, role, airport_id } = req.body || {};
     
+    
+    let userId;
+    let userObj;
     const createRes = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
-    if (createRes.error) throw createRes.error;
+    if (createRes.error) {
+      if (createRes.error.message.includes("already been registered") || createRes.error.message.includes("already exists")) {
+        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+        const existingUser = users?.find(u => u.email === email);
+        if (existingUser) {
+          userId = existingUser.id;
+          userObj = existingUser;
+          await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+        } else {
+          throw createRes.error;
+        }
+      } else {
+        throw createRes.error;
+      }
+    } else {
+      userId = createRes.data.user.id;
+      userObj = createRes.data.user;
+    }
+
     
     if (userObj) {
       await supabaseAdmin.from("user_profiles").upsert({
