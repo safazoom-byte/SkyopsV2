@@ -84,6 +84,7 @@ async function startServer() {
 
   app.post("/api/gemini/generate", aiLimiter, callAI);
 
+  
   app.post("/api/users/create", async (req, res) => {
     try {
       const authHeader = req.headers.authorization;
@@ -96,12 +97,12 @@ async function startServer() {
       if (!hasServiceKey) {
         return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
       }
-      const supabaseAdmin = createClient(
+      const supabaseAdmin = require("@supabase/supabase-js").createClient(
         process.env.VITE_SUPABASE_URL || "",
         process.env.SUPABASE_SERVICE_ROLE_KEY || "",
         { auth: { autoRefreshToken: false, persistSession: false } }
       );
-      const supabaseAnon = createClient(
+      const supabaseAnon = require("@supabase/supabase-js").createClient(
         process.env.VITE_SUPABASE_URL || "",
         process.env.VITE_SUPABASE_ANON_KEY || "",
         { auth: { autoRefreshToken: false, persistSession: false } }
@@ -110,17 +111,46 @@ async function startServer() {
       if (authError || !caller) {
         return res.status(401).json({ error: "Unauthorized" });
       }
+      
+      const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
+      if (!callerProfile || (callerProfile.role !== "super_admin" && callerProfile.role !== "admin")) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      
+      if (callerProfile.role === "admin" && role !== "planner") {
+        return res.status(403).json({ error: "Admins can only create planners" });
+      }
+            
+      let userId;
+      let userObj;
       const createRes = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
       });
       if (createRes.error) {
-        throw createRes.error;
+        if (createRes.error.message.includes("already been registered") || createRes.error.message.includes("already exists")) {
+          // Find the user ID
+          const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+          const existingUser = users?.find(u => u.email === email);
+          if (existingUser) {
+            userId = existingUser.id;
+            userObj = existingUser;
+            // Optionally update password if needed
+            await supabaseAdmin.auth.admin.updateUserById(userId, { password });
+          } else {
+            throw createRes.error;
+          }
+        } else {
+          throw createRes.error;
+        }
+      } else {
+        userId = createRes.data.user.id;
+        userObj = createRes.data.user;
       }
-      if (createRes.data.user) {
+      if (userObj) {
         await supabaseAdmin.from("user_profiles").upsert({
-          id: createRes.data.user.id,
+          id: userId,
           email,
           role,
           airport_id,
@@ -131,9 +161,60 @@ async function startServer() {
           max_shifts: 20,
         });
       }
-      res.json({ success: true, user: createRes.data.user });
-    } catch (err: any) {
+      res.json({ success: true, user: userObj });
+    } catch (err) {
       console.error("Create user error:", err);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/users/delete", async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith("Bearer ")) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const token = authHeader.split(" ")[1];
+      const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!hasServiceKey) {
+        return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
+      }
+      const supabaseAdmin = require("@supabase/supabase-js").createClient(
+        process.env.VITE_SUPABASE_URL || "",
+        process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+        { auth: { autoRefreshToken: false, persistSession: false } }
+      );
+      const supabaseAnon = require("@supabase/supabase-js").createClient(
+        process.env.VITE_SUPABASE_URL || "",
+        process.env.VITE_SUPABASE_ANON_KEY || "",
+        { auth: { autoRefreshToken: false, persistSession: false } }
+      );
+      const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
+      if (authError || !caller) {
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
+      if (!callerProfile || (callerProfile.role !== "super_admin" && callerProfile.role !== "admin")) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const { id, email } = req.body;
+      if (!id) return res.status(400).json({ error: "User ID is required" });
+      if (email === "safazoom@gmail.com") return res.status(403).json({ error: "Cannot delete master user" });
+
+      if (callerProfile.role === "admin") {
+         const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", id).single();
+         if (targetProfile && targetProfile.role !== "planner") {
+            return res.status(403).json({ error: "Admins can only delete planners" });
+         }
+      }
+
+      await supabaseAdmin.auth.admin.deleteUser(id);
+      await supabaseAdmin.from("user_profiles").delete().eq("id", id);
+      res.json({ success: true });
+    } catch (err) {
+      console.error("Delete user error:", err);
       res.status(400).json({ error: err.message });
     }
   });

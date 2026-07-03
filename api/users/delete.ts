@@ -1,7 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
+
 export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: "Method not allowed" });
+
   try {
     const authHeader = req?.headers?.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
@@ -14,30 +16,32 @@ export default async function handler(req: any, res: any) {
     if (!serviceKey) return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
     
     const supabaseAdmin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
-    if (!supabaseAdmin) throw new Error("supabaseAdmin is undefined");
-    if (!supabaseAdmin.auth) throw new Error("supabaseAdmin.auth is undefined");
-    if (!supabaseAdmin.auth.admin) throw new Error("supabaseAdmin.auth.admin is undefined");
-    
     const supabaseAnon = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
-    if (!supabaseAnon) throw new Error("supabaseAnon is undefined");
-    if (!supabaseAnon.auth) throw new Error("supabaseAnon.auth is undefined");
     
     const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
     if (authError || !caller) return res.status(401).json({ error: "Unauthorized" });
     
-    const { email, password, role, airport_id } = req.body || {};
-    
-    const createRes = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
-    if (createRes.error) throw createRes.error;
-    
-    if (userObj) {
-      await supabaseAdmin.from("user_profiles").upsert({
-        id: userId, email, role, airport_id, ai_daily_limit: 5, ai_weekly_limit: 20, ai_monthly_limit: 50, max_staff: 50, max_shifts: 20,
-      });
+    // Check caller role
+    const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
+    if (!callerProfile || (callerProfile.role !== "super_admin" && callerProfile.role !== "admin")) {
+        return res.status(403).json({ error: "Forbidden" });
     }
-    res.status(200).json({ success: true, user: userObj });
+
+    const { id, email } = req.body || {};
+    if (!id) return res.status(400).json({ error: "User ID is required" });
+    
+    // Prevent deleting safazoom
+    if (email === "safazoom@gmail.com") {
+      return res.status(403).json({ error: "Cannot delete master user" });
+    }
+
+    // Delete from auth first, which might cascade depending on setup, but we'll manually delete profile just in case
+    await supabaseAdmin.auth.admin.deleteUser(id);
+    await supabaseAdmin.from("user_profiles").delete().eq("id", id);
+    
+    res.status(200).json({ success: true });
   } catch (err: any) {
-    console.error("Create user error:", err);
-    res.status(400).json({ error: `VercelAPI: ${err.message}` });
+    console.error("Delete user error:", err);
+    res.status(400).json({ error: \`VercelAPI: \${err.message}\` });
   }
 }

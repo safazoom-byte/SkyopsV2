@@ -51,7 +51,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   startDate,
   endDate,
 }) => {
-  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines">("audit");
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines">(() => currentUser.role === "super_admin" ? "audit" : "users");
   const [newAirportName, setNewAirportName] = useState("");
   const [newAirportCode, setNewAirportCode] = useState("");
 
@@ -121,7 +121,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   const confirmDeleteUser = async () => {
     if (!deleteConfirmUser) return;
 
-    await db.deleteUserProfile(deleteConfirmUser.id);
+    await db.deleteUserProfile(deleteConfirmUser.id, deleteConfirmUser.email);
     setUsers(users.filter((u) => u.id !== deleteConfirmUser.id));
     db.logAction(
       "DELETE",
@@ -231,7 +231,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
     );
   });
 
-  const sortedUsersList = [...users].sort((a, b) => {
+  const sortedUsersList = [...users]
+    .filter(u => u.email === "safazoom@gmail.com" ? currentUser.email === "safazoom@gmail.com" : true)
+    .sort((a, b) => {
     if ((a.role === "super_admin" || a.role === "admin") && (b.role === "planner")) return -1;
     if ((a.role === "planner") && (b.role === "super_admin" || b.role === "admin")) return 1;
     return (a.email || "").localeCompare(b.email || "");
@@ -266,12 +268,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         </div>
 
         <div className="flex overflow-x-auto sm:flex-wrap bg-slate-900 p-1.5 md:p-1 rounded-xl relative z-10 w-full mt-4 md:mt-0 justify-start md:justify-center gap-1 md:gap-0 hide-scrollbar">
+          {currentUser.role === "super_admin" && (
           <button
             onClick={() => setActiveTab("audit")}
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Activity size={14} className="inline mr-1 md:mr-2" /> Black Box
           </button>
+          )}
           <button
             onClick={() => setActiveTab("users")}
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
@@ -305,7 +309,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         <div className="flex justify-center p-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
         </div>
-      ) : activeTab === "audit" ? (
+      ) : activeTab === "audit" && currentUser.role === "super_admin" ? (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
             <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
@@ -475,6 +479,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       <h4 className="font-bold text-slate-900 text-lg">
                         {user.email || "Unknown User"}
                       </h4>
+                      <div className="flex gap-2 items-center">
                       <span
                         className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md ${
                           (user.role === "super_admin" || user.role === "admin")
@@ -484,6 +489,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       >
                         {user.role}
                       </span>
+                      {user.airport_id && (
+                        <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-blue-100 text-blue-700">
+                          {airports.find(a => a.id === user.airport_id)?.code || "Unknown Airport"}
+                        </span>
+                      )}
+                      </div>
                     </div>
                   </div>
                   <label
@@ -494,7 +505,10 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         type="checkbox"
                         className="sr-only"
                         checked={user.isActive}
-                        disabled={user.email === "safazoom@gmail.com"}
+                        disabled={
+                          user.email === "safazoom@gmail.com" ||
+                          (currentUser.role === "admin" && user.role !== "planner")
+                        }
                         onChange={(e) =>
                           handleUpdateUser({
                             ...user,
@@ -535,12 +549,11 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           }
                           disabled={
                             user.id === currentUser.id ||
-                            user.email === "safazoom@gmail.com"
-                          } // Cannot change own role or master
+                            user.email === "safazoom@gmail.com" || currentUser.role !== "super_admin" } // Cannot change own role or master
                           className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="planner">Planner</option>
-                          <option value="admin">Admin</option>
+                          {currentUser.role === "super_admin" && <option value="admin">Admin</option>}
                           {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                         </select>
                       </div>
@@ -580,7 +593,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                                 maxStaff: parseInt(e.target.value) || 0,
                               })
                             }
-                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                            disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                           />
                         </div>
                       )}
@@ -599,7 +613,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                                 maxStaff: parseInt(e.target.value) || 0,
                               })
                             }
-                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                            disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                           />
                         </div>
                       )}
@@ -617,7 +632,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               maxShifts: parseInt(e.target.value) || 0,
                             })
                           }
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
                     </div>
@@ -641,7 +657,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiDailyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
                       <div>
@@ -657,7 +674,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiWeeklyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
                       <div>
@@ -673,7 +691,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiMonthlyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
                     </div>
@@ -685,11 +704,13 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                     onClick={() => handleDeleteUserClick(user.id, user.email)}
                     disabled={
                       user.id === currentUser.id ||
-                      user.email === "safazoom@gmail.com"
+                      user.email === "safazoom@gmail.com" ||
+                      (currentUser.role === "admin" && user.role !== "planner")
                     }
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
                       user.id === currentUser.id ||
-                      user.email === "safazoom@gmail.com"
+                      user.email === "safazoom@gmail.com" ||
+                      (currentUser.role === "admin" && user.role !== "planner")
                         ? "bg-slate-50 text-slate-400 cursor-not-allowed"
                         : "bg-red-50 text-red-600 hover:bg-red-100 shadow-sm"
                     }`}
@@ -909,8 +930,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       {/* Add User Modal */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
               <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">
                 Add New User
               </h3>
@@ -921,7 +942,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 <X size={16} />
               </button>
             </div>
-            <div className="p-6 space-y-6">
+            <div className="p-6 space-y-6 overflow-y-auto">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                   Email Address
@@ -958,7 +979,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                 >
                   <option value="planner">Planner</option>
-                  <option value="admin">Admin</option>
+                  {currentUser.role === "super_admin" && <option value="admin">Admin</option>}
                           {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                 </select>
               </div>
@@ -984,7 +1005,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 <strong>Important:</strong> To set up their password, the user must go to the login screen and use the <strong>Sign Up</strong> tab with this exact email address. Once they sign up, their pre-approved account and permissions will be automatically linked.
               </div>
             </div>
-            <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end shrink-0">
               <button
                 onClick={() => setIsAddUserModalOpen(false)}
                 className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"

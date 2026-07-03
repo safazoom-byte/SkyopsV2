@@ -796,7 +796,8 @@ export const db = {
           console.warn("Supabase select error:", error);
         }
         if (data) {
-          return data.map((d: any) => ({
+          const filteredData = data.filter((d) => d.email === "safazoom@gmail.com" ? profile?.email === "safazoom@gmail.com" : true);
+          return filteredData.map((d: any) => ({
             id: d.id,
             email: d.email,
             role: d.role,
@@ -846,13 +847,24 @@ export const db = {
     }
   },
 
-  async deleteUserProfile(id: string) {
-    if (supabase) {
-      try {
-        await supabase.from("user_profiles").delete().eq("id", id);
-      } catch (e) {
-        console.warn("Could not delete profile from DB");
+  async deleteUserProfile(id: string, email: string) {
+    const session = await auth.getSession();
+    if (!session) return;
+    try {
+      const res = await fetch("/api/users/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ id, email }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to delete user");
       }
+    } catch (e) {
+      console.warn("Could not delete profile via API", e);
     }
   },
 
@@ -931,7 +943,12 @@ export const db = {
   async getAirports(): Promise<Airport[]> {
     if (!supabase) return [];
     try {
-      const { data } = await supabase.from("airports").select("*").order("name");
+      const profile = await this.getUserProfile();
+      let query = supabase.from("airports").select("*").order("name");
+      if (profile?.role !== "super_admin" && profile?.airport_id) {
+        query = query.eq("id", profile.airport_id);
+      }
+      const { data } = await query;
       return data || [];
     } catch (e) {
       return [];
@@ -943,8 +960,13 @@ export const db = {
     try {
       const profile = await this.getUserProfile();
       let query = supabase.from("airlines").select("*").order("name");
-      if (profile?.airport_id) {
-         query = query.eq("airport_id", profile.airport_id);
+      if (profile?.role !== "super_admin") {
+         if (profile?.airport_id) {
+           query = query.eq("airport_id", profile.airport_id);
+         } else {
+           // If they have no airport assigned and they are not a super admin, they should see no airlines
+           return [];
+         }
       }
       const { data } = await query;
       return data || [];
@@ -1004,7 +1026,8 @@ export const db = {
 
         const { data } = await query;
         if (data && data.length > 0) {
-          return data.map((d: any) => ({
+          const filteredData = data.filter((d) => d.user_email === "safazoom@gmail.com" ? profile?.email === "safazoom@gmail.com" : true);
+          return filteredData.map((d: any) => ({
             id: d.id,
             userId: d.user_id,
             userEmail: d.user_email,

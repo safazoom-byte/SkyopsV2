@@ -948,7 +948,7 @@ const App: React.FC = () => {
           >
             <LogOut size={16} />
           </button>
-          {userProfile?.role === "super_admin" && (
+          {userProfile?.role === "super_admin" ? (
             <select 
               value={userProfile.airport_id || ""}
               onChange={async (e) => {
@@ -963,7 +963,11 @@ const App: React.FC = () => {
               <option value="" disabled>Select Airport</option>
               {airports.map(a => <option key={a.id} value={a.id}>{a.code}</option>)}
             </select>
-          )}
+          ) : userProfile?.airport_id ? (
+            <div className="ml-4 p-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold border border-blue-700 tracking-wider shadow-sm flex items-center justify-center min-w-[3rem]">
+              {airports.find(a => a.id === userProfile.airport_id)?.code || "UNK"}
+            </div>
+          ) : null}
         </div>
       </header>
 
