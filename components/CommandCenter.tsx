@@ -385,34 +385,6 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             )}
           </div>
         </div>
-      
-      ) : activeTab === "system" ? (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-            <h4 className="font-bold text-slate-800 mb-6">Database Migration</h4>
-            <p className="text-sm text-slate-500 mb-6">
-              If your data is not appearing after an update, it might not be assigned to an airport. Use this tool to assign all unassigned data to your currently selected airport.
-            </p>
-            <button
-              onClick={async () => {
-                if (!currentUser.airport_id) {
-                   setErrorModalMessage("Please select an airport from the top right dropdown first!");
-                   return;
-                }
-                const data = await db.migrateUnassignedData(currentUser.airport_id);
-                if (data.success) {
-                  setErrorModalMessage("Migration successful! Unassigned data is now linked to your current airport. Refreshing...");
-                  setTimeout(() => window.location.reload(), 2000);
-                } else {
-                  setErrorModalMessage(data.error || "Migration failed.");
-                }
-              }}
-              className="px-6 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-md shadow-blue-600/20 hover:bg-blue-700 transition-colors"
-            >
-              Assign Unassigned Data to Current Airport
-            </button>
-          </div>
-        </div>
       ) : activeTab === "airports" && currentUser.role === "super_admin" ? (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
@@ -888,6 +860,31 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                             Restore Backup
                           </button>
                         </div>
+                      </div>
+                    </div>
+                    
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Database Migration</h5>
+                      <p className="text-xs text-slate-400 mb-4">Assign unassigned data to your currently selected airport.</p>
+                      <div>
+                        <button
+                          onClick={async () => {
+                            if (!currentUser.airport_id) {
+                               setErrorModalMessage("Please select an airport from the top right dropdown first!");
+                               return;
+                            }
+                            const data = await db.migrateUnassignedData(currentUser.airport_id);
+                            if (data.success) {
+                              setErrorModalMessage("Migration successful! Unassigned data is now linked to your current airport. Refreshing...");
+                              setTimeout(() => window.location.reload(), 2000);
+                            } else {
+                              setErrorModalMessage(data.error || "Migration failed.");
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-100 transition-colors"
+                        >
+                          Assign Unassigned Data
+                        </button>
                       </div>
                     </div>
                   </div>
