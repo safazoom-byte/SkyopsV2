@@ -1014,7 +1014,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
 
     const matrixBody = sortedMatrixStaffPdf.map((s, idx) => {
-      const row = [
+      const row: any[] = [
         (idx + 1).toString(),
         `${s.name} (${s.initials})`,
       ];
@@ -1035,8 +1035,13 @@ export const ProgramDisplay: React.FC<Props> = ({
             const shiftStart = new Date(pDate);
             shiftStart.setHours(ph, pm, 0, 0);
             const rest = calculateRestHours(s.id, shiftStart);
+            const restWarning = rest !== null && rest < minRestHours;
             const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : "";
-            row.push(`${shift.pickupTime} ${restLabel}`);
+            if (restWarning) {
+              row.push({ content: `${shift.pickupTime} ${restLabel}`, styles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: "bold" } });
+            } else {
+              row.push(`${shift.pickupTime} ${restLabel}`);
+            }
           } else {
             row.push("ERR");
           }
@@ -1105,7 +1110,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             data.column.index > 1 &&
             data.column.index < dateHeaders.length + 2
           ) {
-            const text = data.cell.raw as string;
+            const text = typeof data.cell.raw === "object" && data.cell.raw !== null && "content" in (data.cell.raw as any) ? (data.cell.raw as any).content : (data.cell.raw as string);
             
             if (text === "-") {
               // removed fillColor to keep row color
@@ -2468,8 +2473,23 @@ export const ProgramDisplay: React.FC<Props> = ({
             {sortedMatrixStaff.map((s, idx) => {
               let workedCount = 0;
               let excusedLeaves = 0;
+              
+              let rowClass = "transition-colors ";
+              if (s.isDriver) rowClass += "bg-amber-100/50 hover:bg-amber-100/70";
+              else if (s.isLabour) rowClass += "bg-orange-100/50 hover:bg-orange-100/70";
+              else if (s.isSecurity) rowClass += "bg-green-100/50 hover:bg-green-100/70";
+              else if (s.isAccountant) rowClass += "bg-purple-100/50 hover:bg-purple-100/70";
+              else rowClass += "bg-blue-100/50 hover:bg-blue-100/70";
+              
+              if (idx % 2 !== 0) {
+                if (s.isDriver) rowClass = "transition-colors bg-amber-200/40 hover:bg-amber-200/60";
+                else if (s.isLabour) rowClass = "transition-colors bg-orange-200/40 hover:bg-orange-200/60";
+                else if (s.isSecurity) rowClass = "transition-colors bg-green-200/40 hover:bg-green-200/60";
+                else if (s.isAccountant) rowClass = "transition-colors bg-purple-200/40 hover:bg-purple-200/60";
+                else rowClass = "transition-colors bg-blue-200/40 hover:bg-blue-200/60";
+              }
               return (
-                <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                <tr key={s.id} className={rowClass}>
                   <td className="px-4 py-2 text-center border-r border-slate-100">
                     {idx + 1}
                   </td>
@@ -2517,12 +2537,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                         const restWarning =
                           rest !== null && rest < minRestHours;
                         if (restWarning) {
-                          cellClass += " bg-rose-50";
+                          cellClass += " !bg-red-500 !text-white !border-red-600 shadow-inner";
                         }
                         content = (
                           <div className="flex flex-col items-center gap-1">
                             <span
-                              className={`font-bold ${restWarning ? "text-rose-600" : "text-slate-900"}`}
+                              className={`font-bold ${restWarning ? "text-white" : "text-slate-900"}`}
                             >
                               {shift.pickupTime}
                             </span>
@@ -2540,7 +2560,24 @@ export const ProgramDisplay: React.FC<Props> = ({
                           <span className="text-rose-500 font-bold">ERR</span>
                         );
                       }
+
+                    } else {
+                      const leave = hasLeaveOnDate(s.id, p.dateString!);
+                      if (leave) {
+                        if (leave.type === "Day off") {
+                          content = <span className="font-bold text-slate-900">-</span>;
+                        } else if (leave.type === "Annual leave") {
+                          content = <span className="font-bold text-yellow-900">Annual</span>;
+                        } else if (leave.type === "Sick leave") {
+                          content = <span className="font-bold text-red-900 bg-red-300 px-2 py-0.5 rounded">SL</span>;
+                        } else if (leave.type === "Roster leave") {
+                          content = <span className="font-bold text-purple-900 bg-purple-300 px-2 py-0.5 rounded">RL</span>;
+                        } else {
+                          content = <span className="font-bold text-slate-500">{leave.type}</span>;
+                        }
+                      }
                     }
+
                     return (
                       <td key={i} className={cellClass}>
                         {content}
