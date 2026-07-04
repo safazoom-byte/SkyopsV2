@@ -59,6 +59,6 @@ export default async function handler(req: any, res: any) {
     res.status(200).json({ success: true, user: userObj });
   } catch (err: any) {
     console.error("Create user error:", err);
-    res.status(400).json({ error: `VercelAPI: ${err.message}` });
+    res.status(400).json({ error: "Something went wrong" });
   }
 }

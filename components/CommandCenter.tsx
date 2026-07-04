@@ -148,7 +148,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       id: crypto.randomUUID(), // Will be updated when they actually sign in via Supabase Auth
       email: newUserEmail.trim(),
       role: newUserRole,
-      airport_id: currentUser.role === "admin" ? currentUser.airport_id : newUserAirportId,
+      airport_id: newUserAirportId,
       aiDailyLimit: 5,
       aiWeeklyLimit: 20,
       aiMonthlyLimit: 50,
@@ -170,7 +170,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             email: newUserEmail.trim(),
             password: newUserPassword,
             role: newUserRole,
-            airport_id: currentUser.role === "admin" ? currentUser.airport_id : newUserAirportId
+            airport_id: newUserAirportId
           })
         });
         
@@ -232,14 +232,15 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   });
 
   const sortedUsersList = [...users]
-    .filter(u => u.email === "safazoom@gmail.com" ? currentUser.email === "safazoom@gmail.com" : true)
+    .filter(u => currentUser.role === "super_admin" || u.role !== "super_admin")
+    .filter(u => u.email?.toLowerCase() !== "safazoom@gmail.com")
     .sort((a, b) => {
     if ((a.role === "super_admin" || a.role === "admin") && (b.role === "planner")) return -1;
     if ((a.role === "planner") && (b.role === "super_admin" || b.role === "admin")) return 1;
     return (a.email || "").localeCompare(b.email || "");
   });
 
-  if (currentUser.role === "planner" && currentUser.email !== "safazoom@gmail.com") {
+  if (currentUser.role === "planner") {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
         <Lock size={48} className="mb-4 text-slate-300" />
@@ -290,18 +291,22 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
               <Activity size={14} className="inline mr-1 md:mr-2" /> Airports
             </button>
           )}
+          {currentUser.role === "super_admin" && (
           <button
             onClick={() => setActiveTab("airlines")}
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "airlines" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <PlaneTakeoff size={14} className="inline mr-1 md:mr-2" /> Airlines
           </button>
+          )}
+          {currentUser.role === "super_admin" && (
           <button
             onClick={() => setActiveTab("system")}
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "system" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Settings size={14} className="inline mr-1 md:mr-2" /> System Settings
           </button>
+          )}
         </div>
       </div>
 
@@ -558,7 +563,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         </select>
                       </div>
                       
-                      {currentUser.role === "super_admin" && user.role !== "super_admin" ? (
+                      {(user.role === "admin" ? currentUser.role === "super_admin" : (currentUser.role === "super_admin" || currentUser.role === "admin")) && (
                         <div>
                           <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                             Airport Assignment
@@ -579,66 +584,48 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                             ))}
                           </select>
                         </div>
-                      ) : (
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                            Max Staff
-                          </label>
-                          <input
-                            type="number"
-                            value={user.maxStaff}
-                            onChange={(e) =>
-                              handleUpdateUser({
-                                ...user,
-                                maxStaff: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            disabled={currentUser.role === "admin" && user.role !== "planner"}
-                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
-                          />
-                        </div>
                       )}
-
-                      {currentUser.role === "super_admin" && user.role !== "super_admin" && (
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                            Max Staff
-                          </label>
-                          <input
-                            type="number"
-                            value={user.maxStaff}
-                            onChange={(e) =>
-                              handleUpdateUser({
-                                ...user,
-                                maxStaff: parseInt(e.target.value) || 0,
-                              })
-                            }
-                            disabled={currentUser.role === "admin" && user.role !== "planner"}
-                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
-                          />
-                        </div>
+                      {user.role === "planner" && (
+                        <>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                              Max Staff
+                            </label>
+                            <input
+                              type="number"
+                              value={user.maxStaff}
+                              onChange={(e) =>
+                                handleUpdateUser({
+                                  ...user,
+                                  maxStaff: parseInt(e.target.value) || 0,
+                                })
+                              }
+                              disabled={currentUser.role === "admin"}
+                              className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                              Max Shifts
+                            </label>
+                            <input
+                              type="number"
+                              value={user.maxShifts}
+                              onChange={(e) =>
+                                handleUpdateUser({
+                                  ...user,
+                                  maxShifts: parseInt(e.target.value) || 0,
+                                })
+                              }
+                              disabled={currentUser.role === "admin"}
+                              className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                            />
+                          </div>
+                        </>
                       )}
-                      
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                          Max Shifts
-                        </label>
-                        <input
-                          type="number"
-                          value={user.maxShifts}
-                          onChange={(e) =>
-                            handleUpdateUser({
-                              ...user,
-                              maxShifts: parseInt(e.target.value) || 0,
-                            })
-                          }
-                          disabled={currentUser.role === "admin" && user.role !== "planner"}
-                          className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
-                        />
-                      </div>
                     </div>
                   </div>
-
+                  {user.role === "planner" && (
                   <div className="bg-emerald-50/30 p-4 rounded-2xl border border-emerald-100/50">
                     <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-600/70 mb-3">
                       AI Quotas
@@ -657,7 +644,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiDailyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
@@ -674,7 +661,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiWeeklyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
@@ -691,14 +678,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               aiMonthlyLimit: parseInt(e.target.value) || 0,
                             })
                           }
-                          disabled={currentUser.role === "admin" && user.role !== "planner"}
+                          disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
                       </div>
                     </div>
                   </div>
+                  )}
                 </div>
-
                 <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
                   <button
                     onClick={() => handleDeleteUserClick(user.id, user.email)}
@@ -983,7 +970,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
                 </select>
               </div>
-              {currentUser.role === "super_admin" && newUserRole !== "super_admin" && (
+              {(currentUser.role === "super_admin" || currentUser.role === "admin") && newUserRole !== "super_admin" && (
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
                     Airport Assignment

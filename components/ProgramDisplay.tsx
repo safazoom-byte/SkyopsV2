@@ -1021,9 +1021,10 @@ export const ProgramDisplay: React.FC<Props> = ({
       let workedCount = 0;
       let excusedLeaves = 0;
       activePrograms.forEach((p) => {
-        const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
-        if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+        const leave = hasLeaveOnDate(s.id, p.dateString!);
+        if (leave && leave.type !== "Day off" && !p.assignments.some((a) => a.staffId === s.id)) {
           excusedLeaves++;
+        }
         const assign = p.assignments.find((a) => a.staffId === s.id);
         if (assign) {
           workedCount++;
@@ -1039,6 +1040,12 @@ export const ProgramDisplay: React.FC<Props> = ({
           } else {
             row.push("ERR");
           }
+        } else if (leave) {
+          if (leave.type === "Day off") row.push("-");
+          else if (leave.type === "Annual leave") row.push("Annual");
+          else if (leave.type === "Sick leave") row.push("SL");
+          else if (leave.type === "Roster leave") row.push("RL");
+          else row.push(leave.type);
         } else {
           row.push("-");
         }
@@ -1064,6 +1071,32 @@ export const ProgramDisplay: React.FC<Props> = ({
           data.cell.styles.fillColor = [79, 70, 229]; // indigo-600
         }
         if (data.section === "body") {
+          const staff = sortedMatrixStaffPdf[data.row.index];
+          if (staff) {
+            let baseColor = [255, 255, 255]; // white default
+            if (staff.isDriver) {
+              baseColor = [254, 243, 199]; // amber-100 (light yellow)
+            } else if (staff.isLabour) {
+              baseColor = [255, 237, 213]; // orange-100 (light orange)
+            } else if (staff.isSecurity) {
+              baseColor = [220, 252, 231]; // green-100 (light green)
+            } else if (staff.isAccountant) {
+              baseColor = [243, 232, 255]; // purple-100
+            } else {
+              baseColor = [219, 234, 254]; // blue-100 (traffic/normal)
+            }
+
+            // Striping
+            if (data.row.index % 2 !== 0) {
+              baseColor = [
+                Math.max(0, baseColor[0] - 12),
+                Math.max(0, baseColor[1] - 12),
+                Math.max(0, baseColor[2] - 12),
+              ];
+            }
+            data.cell.styles.fillColor = baseColor as [number, number, number];
+          }
+
           if (data.column.index === dateHeaders.length + 2) {
             data.cell.styles.fillColor = [238, 242, 255]; // indigo-50
             data.cell.styles.textColor = [49, 46, 129]; // indigo-900
@@ -1073,7 +1106,24 @@ export const ProgramDisplay: React.FC<Props> = ({
             data.column.index < dateHeaders.length + 2
           ) {
             const text = data.cell.raw as string;
-            if (text && text.includes("[")) {
+            
+            if (text === "-") {
+              // removed fillColor to keep row color
+              data.cell.styles.textColor = [15, 23, 42]; // slate-900
+              data.cell.styles.fontStyle = "bold";
+            } else if (text === "Annual") {
+              // removed fillColor to keep row color
+              data.cell.styles.textColor = [113, 63, 18]; // yellow-900
+              data.cell.styles.fontStyle = "bold";
+            } else if (text === "SL") {
+              data.cell.styles.fillColor = [252, 165, 165]; // red-300
+              data.cell.styles.textColor = [127, 29, 29]; // red-900
+              data.cell.styles.fontStyle = "bold";
+            } else if (text === "RL") {
+              data.cell.styles.fillColor = [216, 180, 254]; // purple-300
+              data.cell.styles.textColor = [88, 28, 135]; // purple-900
+              data.cell.styles.fontStyle = "bold";
+            } else if (text && text.includes("[")) {
               const match = text.match(/\[([\d.]+)H\]/);
               if (match) {
                 const rest = parseFloat(match[1]);
@@ -3925,7 +3975,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             manualSortIndex: maxSort + 1
           });
           newPrograms[progIdx] = newProg;
-          onUpdatePrograms(newPrograms, [programs[progIdx].dateString]);
+          onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
         };
 
         const removeStaff = (staffId: string) => {
@@ -3935,7 +3985,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             a => !(a.staffId === staffId && a.shiftId === shift.id)
           );
           newPrograms[progIdx] = newProg;
-          onUpdatePrograms(newPrograms, [programs[progIdx].dateString]);
+          onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
         };
 
         const handleSaveBulkEdit = () => {
@@ -3979,7 +4029,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           });
 
           newPrograms[progIdx] = newProg;
-          onUpdatePrograms(newPrograms, [programs[progIdx].dateString]);
+          onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
           setIsShiftBulkEditMode(false);
           setShiftBulkEditText("");
         };
@@ -4152,7 +4202,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                           if (aIdx !== -1) {
                             currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
                             newProgs[progIdx] = currentProg;
-                            onUpdatePrograms(newProgs, [programs[progIdx].dateString]);
+                            onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
                           }
                         }
                       }}

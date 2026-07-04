@@ -784,9 +784,13 @@ export const db = {
       try {
         const profile = await this.getUserProfile();
         let query = supabase.from("user_profiles").select("*");
-        if (profile?.airport_id) {
-          query = query.eq("airport_id", profile.airport_id);
-        } else if (profile?.role !== "super_admin") {
+        if (profile?.role === "super_admin") {
+          // Allow all
+        } else if (profile?.role === "admin") {
+          if (profile.airport_id) {
+            query = query.eq("airport_id", profile.airport_id);
+          }
+        } else {
           const session = await auth.getSession();
           query = query.eq("id", session?.user?.id || "");
         }
@@ -796,7 +800,7 @@ export const db = {
           console.warn("Supabase select error:", error);
         }
         if (data) {
-          const filteredData = data.filter((d) => d.email === "safazoom@gmail.com" ? profile?.email === "safazoom@gmail.com" : true);
+          const filteredData = data.filter((d) => d.email?.toLowerCase() !== "safazoom@gmail.com");
           return filteredData.map((d: any) => ({
             id: d.id,
             email: d.email,
@@ -848,6 +852,10 @@ export const db = {
   },
 
   async deleteUserProfile(id: string, email: string) {
+    if (email?.toLowerCase() === "safazoom@gmail.com") {
+      console.warn("Cannot delete master account.");
+      return;
+    }
     const session = await auth.getSession();
     if (!session) return;
     try {
@@ -945,8 +953,12 @@ export const db = {
     try {
       const profile = await this.getUserProfile();
       let query = supabase.from("airports").select("*").order("name");
-      if (profile?.role !== "super_admin" && profile?.airport_id) {
-        query = query.eq("id", profile.airport_id);
+      if (profile?.role !== "super_admin") {
+        if (profile?.airport_id) {
+          query = query.eq("id", profile.airport_id);
+        } else {
+          return [];
+        }
       }
       const { data } = await query;
       return data || [];
@@ -1026,7 +1038,7 @@ export const db = {
 
         const { data } = await query;
         if (data && data.length > 0) {
-          const filteredData = data.filter((d) => d.user_email === "safazoom@gmail.com" ? profile?.email === "safazoom@gmail.com" : true);
+          const filteredData = data.filter((d) => d.user_email?.toLowerCase() !== "safazoom@gmail.com");
           return filteredData.map((d: any) => ({
             id: d.id,
             userId: d.user_id,

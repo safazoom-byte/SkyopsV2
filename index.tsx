@@ -925,7 +925,7 @@ const App: React.FC = () => {
                 {tab}
               </button>
             ))}
-            {(userProfile?.role === "super_admin" || userProfile?.role === "admin" || userProfile?.email === "safazoom@gmail.com") && (
+            {(userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
               <button
                 onClick={() => setActiveTab("command")}
                 className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 ${activeTab === "command" ? "bg-emerald-600 text-white shadow-md" : "text-emerald-600 hover:bg-emerald-50"}`}
@@ -972,7 +972,7 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
-        {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin" || userProfile?.email === "safazoom@gmail.com") && (
+        {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
           <CommandCenter currentUser={userProfile} flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
         )}
         {activeTab === "dashboard" && (() => {
@@ -1834,7 +1834,7 @@ const App: React.FC = () => {
               // If changedDateStrings is provided, use it directly
               let changedPrograms = updated;
               if (changedDateStrings && changedDateStrings.length > 0) {
-                changedPrograms = updated.filter(u => changedDateStrings.includes(u.dateString));
+                changedPrograms = updated.filter(u => changedDateStrings.includes(u.dateString as string));
               } else {
                 changedPrograms = updated.filter(u => {
                   const prev = programs.find(p => p.dateString === u.dateString);
@@ -1929,7 +1929,7 @@ const App: React.FC = () => {
           { id: "shifts", icon: Clock, label: "Shifts" },
           { id: "program", icon: CalendarDays, label: "Roster" },
           { id: "statistics", icon: PieChart, label: "Stats" },
-          ...((userProfile?.role === "super_admin" || userProfile?.role === "admin" || userProfile?.email === "safazoom@gmail.com")
+          ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
             ? [{ id: "command", icon: Shield, label: "Cmd" }]
             : []),
         ].map((item) => (

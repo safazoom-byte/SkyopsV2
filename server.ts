@@ -14,7 +14,21 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(helmet({
-    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+    xFrameOptions: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https:"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+        fontSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'", "https:", "wss:", "ws:", "data:"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        workerSrc: ["'self'", "blob:"],
+        frameAncestors: ["'*'", "*", "https:"],
+      },
+    },
   }));
 
   const globalLimiter = rateLimit({
@@ -78,7 +92,7 @@ async function startServer() {
       res.json({ result: response.text });
     } catch (err: any) {
       console.error("AI Error:", err);
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ error: "Something went wrong" });
     }
   };
 
@@ -132,7 +146,7 @@ async function startServer() {
         if (createRes.error.message.includes("already been registered") || createRes.error.message.includes("already exists")) {
           // Find the user ID
           const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = users?.find(u => u.email === email);
+          const existingUser = users?.find((u: any) => u.email === email);
           if (existingUser) {
             userId = existingUser.id;
             userObj = existingUser;
@@ -164,7 +178,7 @@ async function startServer() {
       res.json({ success: true, user: userObj });
     } catch (err) {
       console.error("Create user error:", err);
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: "Something went wrong" });
     }
   });
 
@@ -215,7 +229,7 @@ async function startServer() {
       res.json({ success: true });
     } catch (err) {
       console.error("Delete user error:", err);
-      res.status(400).json({ error: err.message });
+      res.status(400).json({ error: "Something went wrong" });
     }
   });
 
