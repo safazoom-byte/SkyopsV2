@@ -4,6 +4,7 @@ import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from "../constants";
 import { FlightModalDialog } from "./FlightModalDialog";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
+  ChevronDown,
   Clock,
   Trash2,
   Edit2,
@@ -73,6 +74,7 @@ export const ShiftManager: React.FC<Props> = ({
   onDeleteFlight,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
     pickupDate: startDate || new Date().toISOString().split("T")[0],
     pickupTime: "06:00",
@@ -120,6 +122,30 @@ export const ShiftManager: React.FC<Props> = ({
 
   const [draggingFlight, setDraggingFlight] = useState<{ sourceShiftId: string; flightId: string } | null>(null);
   const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
+  const [expandedRolesShiftId, setExpandedRolesShiftId] = useState<string | null>(null);
+
+
+  
+const isFlightOutOfScope = (flight: Flight | undefined, shift: ShiftConfig) => {
+  if (!flight) return false;
+  const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}:00`);
+  const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00`);
+  const flightTimeStr = flight.sta || flight.std;
+  if (!flightTimeStr) return false;
+  const fTime = new Date(`${flight.date}T${flightTimeStr}:00`);
+  return fTime < shiftStart || fTime > shiftEnd;
+};
+
+const calculateShiftDuration = (shift: ShiftConfig) => {
+  const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}:00Z`);
+  const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00Z`);
+  const diffMs = shiftEnd.getTime() - shiftStart.getTime();
+  if (diffMs < 0) return "0h";
+  const hrs = Math.floor(diffMs / 3600000);
+  const mins = Math.floor((diffMs % 3600000) / 60000);
+  if (mins === 0) return `${hrs}h`;
+  return `${hrs}h ${mins}m`;
+};
 
   const handleDragStart = (e: React.DragEvent, sourceShiftId: string, flightId: string) => {
     e.dataTransfer.setData("application/json", JSON.stringify({ sourceShiftId, flightId }));
@@ -410,6 +436,7 @@ export const ShiftManager: React.FC<Props> = ({
     if (editingId) onUpdate(finalData);
     else onAdd(finalData);
     resetForm();
+    setIsFormOpen(false);
   };
 
   const resetForm = () => {
@@ -706,93 +733,36 @@ export const ShiftManager: React.FC<Props> = ({
               Report
             </span>
           </button>
+          <button
+            onClick={() => {
+              setEditingId(null);
+              resetForm();
+              setIsFormOpen(true);
+            }}
+            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-blue-600/20"
+          >
+            <Plus size={16} className="group-hover:scale-110 transition-transform" />
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">
+              New Duty
+            </span>
+          </button>
         </div>
       </div>
 
-      <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 overflow-hidden">
-        <div className="flex items-center justify-between mb-8">
-          <h4 className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.3em] text-slate-400 flex items-center gap-3">
-            <Layers size={16} className="text-blue-600" /> Station Coverage
-            Ribbon
-          </h4>
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex gap-4">
-              {["AM", "PM", "Night"].map((phase) => (
-                <div key={phase} className="flex items-center gap-2">
-                  <div
-                    className={`w-2 h-2 rounded-full ${phase === "AM" ? "bg-blue-500" : phase === "PM" ? "bg-amber-500" : "bg-indigo-400"}`}
-                  ></div>
-                  <span className="text-[7px] font-black uppercase text-slate-400">
-                    {phase}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="sm:hidden flex items-center gap-2 px-3 py-1 bg-slate-50 border border-slate-100 rounded-full animate-pulse">
-              <MoveHorizontal size={10} className="text-blue-500" />
-              <span className="text-[6px] font-black uppercase tracking-widest text-slate-400">
-                Swipe
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="relative overflow-x-auto no-scrollbar pb-2">
-          <div className="relative h-28 md:h-32 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 p-4 min-w-[900px] md:min-w-full overflow-hidden">
-            <div className="absolute inset-0 flex pointer-events-none px-6">
-              {Array.from({ length: 25 }).map((_, i) => (
-                <div
-                  key={i}
-                  className={`h-full border-l border-slate-200/50 flex flex-col justify-end pb-2`}
-                  style={{ position: "absolute", left: `${(i / 24) * 100}%` }}
-                >
-                  {i % 3 === 0 && (
-                    <span className="text-[7px] font-black text-slate-300 ml-1 translate-y-2">
-                      {i}:00
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="relative h-full flex flex-col justify-center gap-2 pt-2">
-              {timelineShifts.map((s) => {
-                const phase = getPhaseStyle(s.pickupTime);
-                const health = getShiftHealth(s);
-                return (
-                  <div
-                    key={s.id}
-                    className={`h-6 md:h-7 rounded-full border-2 border-white shadow-md flex items-center px-4 transition-all hover:scale-[1.01] cursor-pointer ${phase.bg} ${health === "critical" ? "ring-2 ring-rose-500/30" : ""}`}
-                    style={{
-                      marginLeft: `${s.startPercent}%`,
-                      width: `${s.width}%`,
-                    }}
-                    onClick={() => startEdit(s)}
-                  >
-                    <span
-                      className={`text-[8px] font-black uppercase tracking-tighter truncate ${phase.color}`}
-                    >
-                      {s.pickupTime} - {s.endTime}
-                    </span>
-                  </div>
-                );
-              })}
-              {timelineShifts.length === 0 && (
-                <div className="flex flex-col items-center justify-center h-full gap-2">
-                  <Zap size={14} className="text-slate-200" />
-                  <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] italic">
-                    Awaiting Flight Registry Commit
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 md:gap-10">
-        <div className="xl:col-span-1">
-          <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-sm border border-slate-100 xl:sticky xl:top-24 max-h-[85vh] overflow-y-auto no-scrollbar">
+      <div>
+      {(isFormOpen || editingId) && (
+        <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3.5rem] shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto relative no-scrollbar">
+            <button
+              onClick={() => {
+                setIsFormOpen(false);
+                setEditingId(null);
+                resetForm();
+              }}
+              className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+            >
+              <X size={16} />
+            </button>
             <h4 className="text-lg md:text-xl font-black italic uppercase mb-8 flex items-center gap-3 text-slate-900 leading-none">
               {editingId ? (
                 <Edit2 size={20} className="text-indigo-600" />
@@ -1025,7 +995,7 @@ export const ShiftManager: React.FC<Props> = ({
                 )}
                 <button
                   type="submit"
-                  className="flex-[2] py-5 bg-slate-950 text-white rounded-2xl font-black uppercase italic tracking-[0.2em] shadow-xl hover:bg-blue-600 transition-all text-xs active:scale-95 leading-none"
+                  className="flex-[2] py-3 bg-slate-950 text-white rounded-xl font-black uppercase italic tracking-widest shadow-lg hover:bg-blue-600 transition-all text-[10px] active:scale-95 leading-none"
                 >
                   {editingId ? "Apply Edit" : "Register Slot"}
                 </button>
@@ -1033,8 +1003,9 @@ export const ShiftManager: React.FC<Props> = ({
             </form>
           </div>
         </div>
+      )}
 
-        <div className="xl:col-span-3 space-y-8 md:space-y-10">
+      <div className="space-y-8 md:space-y-10">
           {/* Duty Log Box */}
           <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[4rem] shadow-sm border border-slate-100 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-5">
@@ -1182,7 +1153,7 @@ export const ShiftManager: React.FC<Props> = ({
 
             <div className="space-y-12 relative z-10">
               {Object.keys(groupedShifts).length === 0 ? (
-                <div className="py-32 text-center flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-[3rem]">
+                <div className="py-16 text-center flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-[2rem]">
                   <AlertTriangle size={32} className="text-slate-200" />
                   <span className="text-slate-300 font-black uppercase italic text-xl">
                     Registry Empty
@@ -1325,6 +1296,9 @@ export const ShiftManager: React.FC<Props> = ({
                                         onUpdate(updated);
                                       }}
                                     />
+                                    <div className="text-[9px] font-bold text-slate-400 mt-1 text-center bg-slate-100 rounded">
+                                      {calculateShiftDuration(s)}
+                                    </div>
                                   </td>
                                   <td className="px-2 py-2 text-center whitespace-nowrap">
                                     <input
@@ -1354,8 +1328,15 @@ export const ShiftManager: React.FC<Props> = ({
                                     />
                                   </td>
                                   <td className="px-4 py-2">
-                                    <div className="flex flex-wrap gap-1">
-                                      {AVAILABLE_SKILLS.map((skill) => (
+                                    <div className="flex flex-col gap-1 w-24">
+                                      <button 
+                                        onClick={() => setExpandedRolesShiftId(expandedRolesShiftId === s.id ? null : s.id)}
+                                        className="text-[9px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1 flex items-center justify-between hover:bg-indigo-100 transition-colors"
+                                      >
+                                        <span>{expandedRolesShiftId === s.id ? "HIDE ROLES" : "SHOW ROLES"}</span>
+                                        <ChevronDown size={12} className={`transition-transform ${expandedRolesShiftId === s.id ? 'rotate-180' : ''}`} />
+                                      </button>
+                                      {expandedRolesShiftId === s.id && AVAILABLE_SKILLS.map((skill) => (
                                         <div
                                           key={skill}
                                           className="flex items-center gap-1 bg-white border border-slate-200 rounded px-1.5 py-0.5"
@@ -1422,12 +1403,18 @@ export const ShiftManager: React.FC<Props> = ({
                                           ? "bg-emerald-50 border-2 border-emerald-500 scale-[1.03] shadow-md ring-4 ring-emerald-100"
                                           : draggingFlight
                                           ? "bg-indigo-50/40 border-2 border-dashed border-indigo-300 animate-pulse"
+                                          : (s.flightIds && s.flightIds.some(fid => {
+                                              const f = getFlightById(fid);
+                                              return f && isFlightOutOfScope(f, s);
+                                            }))
+                                          ? "bg-rose-50 border-2 border-rose-400"
                                           : "bg-slate-50 border border-slate-200 hover:border-slate-400"
                                       }`}
                                     >
                                       {s.flightIds && s.flightIds.length > 0 ? (
                                         s.flightIds.map((fid) => {
                                           const flight = getFlightById(fid);
+                                          const isOutOfScope = flight ? isFlightOutOfScope(flight, s) : false;
                                           return flight ? (
                                             <span
                                               key={fid}
@@ -1438,9 +1425,11 @@ export const ShiftManager: React.FC<Props> = ({
                                               className={`text-[9px] font-bold px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing hover:-translate-y-px transition-transform ${
                                                 draggingFlight?.flightId === fid
                                                   ? "bg-indigo-600 text-white scale-95 opacity-50"
+                                                  : isOutOfScope
+                                                  ? "bg-rose-500 text-white shadow-sm border border-rose-600 animate-pulse"
                                                   : "text-blue-600 bg-blue-100/50 hover:bg-blue-100 border border-blue-200"
                                               }`}
-                                              title="Click to edit/split/delete, drag to move"
+                                              title={isOutOfScope ? "Flight outside shift scope!" : "Click to edit/split/delete, drag to move"}
                                             >
                                               {flight.flightNumber}
                                             </span>
@@ -1621,7 +1610,7 @@ export const ShiftManager: React.FC<Props> = ({
                               }}
                               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 bg-white rounded-xl shadow-sm border border-slate-100"
                             >
-                              <Trash2 size={16} />
+                              <X size={16} />
                             </button>
 
                             <h5 className="text-xs font-black text-slate-700 uppercase tracking-widest">

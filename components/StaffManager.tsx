@@ -655,7 +655,7 @@ export const StaffManager: React.FC<Props> = ({
               </div>
               <button
                 type="submit"
-                className="w-full py-5 md:py-6 bg-slate-950 text-white rounded-2xl md:rounded-[2.5rem] font-black uppercase italic tracking-[0.2em] md:tracking-[0.3em] shadow-2xl hover:bg-blue-600 text-[10px] md:text-xs transition-all active:scale-95"
+                className="w-full py-3 md:py-4 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest shadow-xl hover:bg-blue-600 text-[10px] transition-all active:scale-95"
               >
                 Commit To Station Registry
               </button>

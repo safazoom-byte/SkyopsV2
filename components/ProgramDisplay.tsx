@@ -10,6 +10,7 @@ import {
   ProgramVersion,
   ManualAssignment,
 } from "../types";
+import { ProgramCheck } from "./ProgramCheck";
 import {
   FileDown,
   CalendarDays,
@@ -76,7 +77,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "Daily" | "Matrix" | "Roles" | "Staff Checks"
+    "Daily" | "Program Check" | "Matrix" | "Roles" | "Staff Checks"
   >("Daily");
   const [unlockAbsences, setUnlockAbsences] = useState(false);
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
@@ -3036,7 +3037,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       </div>
 
       <div className="flex flex-wrap gap-2 md:gap-4 md:justify-center px-2">
-        {["Daily", "Matrix", "Roles", "Staff Checks"].map((tab) => (
+        {["Daily", "Program Check", "Matrix", "Roles", "Staff Checks"].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab as any)}
@@ -3140,6 +3141,16 @@ export const ProgramDisplay: React.FC<Props> = ({
               {activeTab === "Matrix" && renderMatrixTab()}
               {activeTab === "Roles" && renderRolesTab()}
               {activeTab === "Staff Checks" && renderStaffCheckTab()}
+                            {activeTab === "Program Check" && (
+                <ProgramCheck
+                  staff={staff}
+                  shifts={shifts}
+                  programs={activePrograms}
+                  leaveRequests={leaveRequests}
+                  startDate={startDate}
+                  endDate={endDate}
+                />
+              )}
               {activeTab === "Daily" &&
                 activePrograms.map((prog, i) => {
                   const d = new Date(prog.dateString || startDate);

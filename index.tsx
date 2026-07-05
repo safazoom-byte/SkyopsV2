@@ -141,7 +141,7 @@ const App: React.FC = () => {
     | "program"
     | "statistics"
     | "command"
-  >("dashboard");
+      >("dashboard");
   const [cloudStatus, setCloudStatus] = useState<
     "connected" | "offline" | "unconfigured" | "error"
   >("unconfigured");
@@ -1898,7 +1898,9 @@ const App: React.FC = () => {
           />
         )}
 
+        
         {activeTab === "statistics" && (
+
           <div className="max-w-6xl mx-auto space-y-6 md:space-y-12 animate-in fade-in duration-500">
             <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
               <div>
