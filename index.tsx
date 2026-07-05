@@ -10,6 +10,31 @@ polyfill({
   dragImageTranslateOverride: scrollBehaviourDragImageTranslateOverride,
 });
 
+
+
+const origError = console.error;
+console.error = (...args) => {
+  const isMatch = (a: any) => 
+    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid'))) ||
+    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid')));
+  if (args.some(isMatch)) {
+    return;
+  }
+  origError(...args);
+};
+
+const origWarn = console.warn;
+console.warn = (...args) => {
+  const isMatch = (a: any) => 
+    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid'))) ||
+    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid')));
+  if (args.some(isMatch)) {
+    return;
+  }
+  origWarn(...args);
+};
+
+
 // Prevent scrolling while dragging on mobile
 window.addEventListener("touchmove", function () {}, { passive: false });
 
@@ -18,14 +43,14 @@ window.addEventListener("error", (e) => {
   if (e.message?.includes("Invalid Refresh Token")) {
     e.preventDefault();
     localStorage.clear();
-    window.location.reload();
+    
   }
 });
 window.addEventListener("unhandledrejection", (e) => {
   if (e.reason?.message?.includes("Invalid Refresh Token") || e.reason?.message?.includes("Refresh Token Not Found")) {
     e.preventDefault();
     localStorage.clear();
-    window.location.reload();
+    
   }
 });
 
@@ -956,7 +981,7 @@ const App: React.FC = () => {
                 const newProfile = { ...userProfile, airport_id: newId };
                 await db.updateUserProfile(newProfile);
                 setUserProfile(newProfile);
-                window.location.reload();
+                
               }}
               className="ml-4 p-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold outline-none border border-slate-700"
             >
