@@ -209,3 +209,19 @@ declare global {
     }
   }
 }
+
+
+export const isStaffActiveOnDate = (staff: Staff, dateString: string): boolean => {
+  if (staff.isActive === false) return false;
+  if (staff.type !== "Roster") {
+    if (staff.workFromDate && dateString < staff.workFromDate) return false;
+    if (staff.workToDate && dateString > staff.workToDate) return false;
+  }
+  return true;
+};
+
+
+export const isStaffActiveInPeriod = (staff: Staff, programs: DailyProgram[]): boolean => {
+  if (programs.length === 0) return staff.isActive !== false;
+  return programs.some(p => isStaffActiveOnDate(staff, p.dateString!));
+};

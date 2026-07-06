@@ -8,7 +8,7 @@ import {
   IncomingDuty,
   Skill,
   ProgramVersion,
-  ManualAssignment,
+  ManualAssignment,  isStaffActiveOnDate, isStaffActiveInPeriod,
 } from "../types";
 import { ProgramCheck } from "./ProgramCheck";
 import {
@@ -634,7 +634,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
 
       const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
       const pdfCategories: Record<string, string[]> = {
         "DAYS OFF": [],
         "ROSTER LEAVE": [],
@@ -669,10 +669,9 @@ export const ProgramDisplay: React.FC<Props> = ({
             isRosterOutOfContract = !s.rosterPeriods.some(
               (p) => prog.dateString! >= p.start && prog.dateString! <= p.end,
             );
-          } else if (s.workFromDate && s.workToDate) {
-            isRosterOutOfContract =
-              prog.dateString! < s.workFromDate ||
-              prog.dateString! > s.workToDate;
+          } else {
+            if (s.workFromDate && prog.dateString! < s.workFromDate) isRosterOutOfContract = true;
+            if (s.workToDate && prog.dateString! > s.workToDate) isRosterOutOfContract = true;
           }
         }
 
@@ -847,7 +846,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.addPage();
     doc.setFontSize(16);
     doc.text("Weekly Personnel Utilization Audit (Local)", 14, 15);
-    const localStaff = activeStaff.filter((s) => s.type === "Local");
+    const localStaff = activeStaff.filter((s) => s.type === "Local" && isStaffActiveInPeriod(s, activePrograms));
     const localAuditData = localStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
@@ -903,7 +902,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     doc.setFontSize(16);
     doc.setTextColor(0, 0, 0);
     doc.text("Weekly Personnel Utilization Audit (Roster)", 14, 15);
-    const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
+    const rosterStaff = activeStaff.filter((s) => s.type === "Roster" && isStaffActiveInPeriod(s, activePrograms));
     const rosterAuditData = rosterStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
@@ -1002,7 +1001,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       return 1;
     };
 
-    const sortedMatrixStaffPdf = [...staff]
+    const sortedMatrixStaffPdf = [...staff].filter(s => s.isActive !== false && isStaffActiveInPeriod(s, activePrograms))
       .map((s) => ({
         ...s,
         totalHours: getStaffTotalHours(s.id),
@@ -1424,13 +1423,15 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
 
         offStaff.forEach(s => {
           const leave = hasLeaveOnDate(s.id, prog.dateString!);
           let isRosterOutOfContract = false;
-          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
-          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          if (s.type === "Roster") {
+            if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+            if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          }
           
           let mappedCat = "";
           if (leave) {
@@ -1813,7 +1814,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
@@ -1821,8 +1822,10 @@ export const ProgramDisplay: React.FC<Props> = ({
           );
           
           let isRosterOutOfContract = false;
-          if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
-          if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          if (s.type === "Roster") {
+            if (s.workFromDate && s.workFromDate > prog.dateString!) isRosterOutOfContract = true;
+            if (s.workToDate && s.workToDate < prog.dateString!) isRosterOutOfContract = true;
+          }
 
           let mappedCat = "";
           if (leave) {
@@ -2433,7 +2436,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       return 1;
     };
 
-    const sortedMatrixStaff = [...activeStaff]
+    const sortedMatrixStaff = [...activeStaff].filter(s => isStaffActiveInPeriod(s, activePrograms))
       .map((s) => ({
         ...s,
         totalHours: getStaffTotalHours(s.id),
@@ -2767,8 +2770,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const renderStaffCheckTab = () => {
-    const localStaff = activeStaff.filter((s) => s.type === "Local");
-    const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
+    const localStaff = activeStaff.filter((s) => s.type === "Local" && isStaffActiveInPeriod(s, activePrograms));
+    const rosterStaff = activeStaff.filter((s) => s.type === "Roster" && isStaffActiveInPeriod(s, activePrograms));
 
     const renderLocalTable = () => (
       <div className="mb-10 min-w-[800px]">
@@ -3159,7 +3162,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const workingIds = new Set(
                     prog.assignments.map((a) => a.staffId),
                   );
-                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id));
+                  const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
                   const categories: Record<
                     string,
                     {
@@ -3207,10 +3210,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                             prog.dateString! >= p.start &&
                             prog.dateString! <= p.end,
                         );
-                      } else if (s.workFromDate && s.workToDate) {
-                        isRosterOutOfContract =
-                          prog.dateString! < s.workFromDate ||
-                          prog.dateString! > s.workToDate;
+                      } else {
+                        if (s.workFromDate && prog.dateString! < s.workFromDate) isRosterOutOfContract = true;
+                        if (s.workToDate && prog.dateString! > s.workToDate) isRosterOutOfContract = true;
                       }
                     }
                     const item = {
@@ -3268,10 +3270,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                             refProg.dateString! >= p.start &&
                             refProg.dateString! <= p.end,
                         );
-                      } else if (s.workFromDate && s.workToDate) {
-                        isRosterOutOfContract =
-                          refProg.dateString! < s.workFromDate ||
-                          refProg.dateString! > s.workToDate;
+                      } else {
+                        if (s.workFromDate && refProg.dateString! < s.workFromDate) isRosterOutOfContract = true;
+                        if (s.workToDate && refProg.dateString! > s.workToDate) isRosterOutOfContract = true;
                       }
                     }
                     if (leave) {
@@ -3995,7 +3996,7 @@ export const ProgramDisplay: React.FC<Props> = ({
            return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
         }).length;
         const workingIds = new Set(prog.assignments.map(a => a.staffId));
-        const offStaff = activeStaff.filter(s => !workingIds.has(s.id));
+        const offStaff = activeStaff.filter(s => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
 
         const addStaff = (staffId: string) => {
           const newPrograms = [...programs];

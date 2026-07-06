@@ -610,7 +610,7 @@ export const StaffManager: React.FC<Props> = ({
                       className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none"
                       value={newStaff.workFromDate}
                       onChange={(e) => handleInputChange(e, false)}
-                      required
+
                     />
                   </div>
                   <div className="space-y-2">
@@ -623,12 +623,11 @@ export const StaffManager: React.FC<Props> = ({
                       className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl font-bold text-xs text-slate-900 outline-none"
                       value={newStaff.workToDate}
                       onChange={(e) => handleInputChange(e, false)}
-                      required
+
                     />
                   </div>
                 </div>
               )}
-
               <div className="space-y-4 pt-6 border-t border-slate-50">
                 <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex flex-col gap-1">
                   <span>Discipline Matrix</span>
@@ -730,11 +729,11 @@ export const StaffManager: React.FC<Props> = ({
                           {member.name}
                         </h5>
                         <span
-                          className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${member.isActive === false ? "text-rose-500" : isRoster ? "text-amber-600" : "text-blue-600"}`}
+                          className={`text-[7px] md:text-[8px] font-black uppercase tracking-widest ${member.isActive === false ? "text-rose-500" : member.workToDate ? "text-rose-600" : isRoster ? "text-amber-600" : "text-blue-600"}`}
                         >
                           {member.isActive === false
                             ? "DEACTIVATED"
-                            : `${member.type} AGENT`}
+                            : member.workToDate ? `ACTIVE TILL ${new Date(member.workToDate).toLocaleDateString("en-GB", {day:"2-digit", month:"short", year:"2-digit"}).replace(/ /g,"").toUpperCase()}` : `${member.type} AGENT`}
                         </span>
                       </div>
                     </div>
@@ -1196,58 +1195,68 @@ export const StaffManager: React.FC<Props> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
-                  Roster Status
+              <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 mb-6 mt-4">
+                <label className="text-[10px] font-black text-slate-700 uppercase mb-4 block flex items-center gap-2">
+                  <Power size={14} className="text-slate-400" />
+                  Employment Status
                 </label>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditingStaff({
-                        ...editingStaff,
-                        isActive:
-                          editingStaff.isActive !== false ? false : true,
-                      })
-                    }
-                    className={`px-5 py-4 border rounded-2xl flex-1 font-black text-xs flex items-center justify-center gap-2 transition-all ${editingStaff.isActive !== false ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-rose-50 border-rose-200 text-rose-700"}`}
-                  >
-                    <Power size={14} />
-                    {editingStaff.isActive !== false
-                      ? "ACTIVE ON ROSTER"
-                      : "DEACTIVATED"}
-                  </button>
+                
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditingStaff({ ...editingStaff, isActive: true, workToDate: "" })}
+                      className={`flex-1 py-3 px-4 rounded-xl font-black text-[10px] md:text-xs transition-all border ${editingStaff.isActive !== false && !editingStaff.workToDate ? "bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm" : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}
+                    >
+                      ACTIVE
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingStaff({ ...editingStaff, isActive: false })}
+                      className={`flex-1 py-3 px-4 rounded-xl font-black text-[10px] md:text-xs transition-all border ${editingStaff.isActive === false ? "bg-rose-50 border-rose-200 text-rose-700 shadow-sm" : "bg-white border-slate-200 text-slate-400 hover:bg-slate-50"}`}
+                    >
+                      DEACTIVATED NOW
+                    </button>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-200">
+                    <label className="text-[9px] font-black text-slate-500 uppercase mb-3 block">
+                      Or set active period (e.g., Contract dates or Temporary Activation)
+                    </label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-1.5 block">
+                          Active From
+                        </label>
+                        <input
+                          type="date"
+                          name="workFromDate"
+                          className={`w-full px-4 py-3 border rounded-xl font-bold text-xs outline-none transition-all ${editingStaff.workFromDate ? "bg-indigo-50 border-indigo-200 text-indigo-900" : "bg-white border-slate-200 text-slate-900 focus:border-indigo-400"}`}
+                          value={editingStaff.workFromDate || ""}
+                          onChange={(e) => {
+                             setEditingStaff({ ...editingStaff, workFromDate: e.target.value, isActive: true });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[8px] md:text-[9px] font-black text-slate-400 uppercase mb-1.5 block">
+                          Active Until
+                        </label>
+                        <input
+                          type="date"
+                          name="workToDate"
+                          className={`w-full px-4 py-3 border rounded-xl font-bold text-xs outline-none transition-all ${editingStaff.workToDate ? "bg-rose-50 border-rose-200 text-rose-900" : "bg-white border-slate-200 text-slate-900 focus:border-indigo-400"}`}
+                          value={editingStaff.workToDate || ""}
+                          onChange={(e) => {
+                             setEditingStaff({ ...editingStaff, workToDate: e.target.value, isActive: true });
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {editingStaff.type === "Roster" && (
-                <div className="grid grid-cols-2 gap-4 animate-in slide-in-from-top-4">
-                  <div>
-                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
-                      From
-                    </label>
-                    <input
-                      type="date"
-                      name="workFromDate"
-                      className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900"
-                      value={editingStaff.workFromDate || ""}
-                      onChange={(e) => handleInputChange(e, true)}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase mb-2 block">
-                      To
-                    </label>
-                    <input
-                      type="date"
-                      name="workToDate"
-                      className="w-full px-4 py-3 bg-slate-50 border rounded-xl font-bold text-xs text-slate-900"
-                      value={editingStaff.workToDate || ""}
-                      onChange={(e) => handleInputChange(e, true)}
-                    />
-                  </div>
-                </div>
-              )}
 
               <div className="space-y-3">
                 <p className="text-[8px] md:text-[9px] font-black text-slate-600 uppercase flex flex-col gap-1">

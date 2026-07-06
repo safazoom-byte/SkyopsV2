@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Staff, ShiftConfig, DailyProgram, LeaveRequest } from '../types';
+import { Staff, ShiftConfig, DailyProgram, LeaveRequest, isStaffActiveOnDate } from '../types';
 import { AlertCircle, Clock, CalendarX2, UserMinus, ShieldAlert, CheckCircle2, CalendarOff, Hourglass, Users, AlertTriangle } from 'lucide-react';
 
 interface ProgramCheckProps {
@@ -406,6 +406,22 @@ export const ProgramCheck: React.FC<ProgramCheckProps> = ({
                });
            }
         });
+
+        assignments.forEach(a => {
+            const st = staffMap.get(a.staffId);
+            if (st && !isStaffActiveOnDate(st, pDate)) {
+                foundIssues.push({
+                  type: 'error',
+                  title: 'Inactive Staff Assigned',
+                  description: `${st.name} is assigned to shift ${shift.pickupTime}-${shift.endTime} but is deactivated or outside their active period on this date.`,
+                  staffName: st.name,
+                  staffId: st.id,
+                  date: pDate,
+                  icon: UserMinus
+                });
+            }
+        });
+
         
         // 5. Unqualified Staff for Role Check
         assignments.forEach(a => {
