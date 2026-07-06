@@ -825,28 +825,28 @@ export const db = {
     return [];
   },
 
-  async updateUserProfile(profile: UserProfile) {
+    async updateUserProfile(profile: UserProfile) {
     if (supabase) {
       try {
-        const { error } = await supabase.from("user_profiles").upsert({
-          id: profile.id,
-          email: profile.email,
-          role: profile.role,
-          airport_id: profile.airport_id,
-          ai_daily_limit: profile.aiDailyLimit,
-          ai_weekly_limit: profile.aiWeeklyLimit,
-          ai_monthly_limit: profile.aiMonthlyLimit,
-          max_staff: profile.maxStaff,
-          max_shifts: profile.maxShifts,
-          is_active: profile.isActive,
-          company_logo: profile.companyLogo,
-          skyops_logo: profile.skyopsLogo,
-          prepared_by: profile.preparedBy,
-          revised_by: profile.revisedBy,
+        const session = await auth.getSession();
+        if (!session) throw new Error("No session");
+        const token = session.access_token;
+        
+        const response = await fetch("/api/users/update", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ profile })
         });
-        if (error) console.warn("Could not update profile in DB:", error);
+        
+        if (!response.ok) {
+           const err = await response.json();
+           throw new Error(err.error || "Failed to update profile");
+        }
       } catch (e) {
-        console.warn("Could not update profile in DB", e);
+        console.warn("Exception updating profile:", e);
       }
     }
   },

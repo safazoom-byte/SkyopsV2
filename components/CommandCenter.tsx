@@ -595,11 +595,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               type="number"
                               value={user.maxStaff}
                               onChange={(e) =>
-                                handleUpdateUser({
-                                  ...user,
-                                  maxStaff: parseInt(e.target.value) || 0,
-                                })
+                                setUsers(users.map((u) => u.id === user.id ? { ...u, maxStaff: parseInt(e.target.value) || 0 } : u))
                               }
+                              onBlur={() => handleUpdateUser(user)}
                               disabled={currentUser.role === "admin"}
                               className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                             />
@@ -612,11 +610,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               type="number"
                               value={user.maxShifts}
                               onChange={(e) =>
-                                handleUpdateUser({
-                                  ...user,
-                                  maxShifts: parseInt(e.target.value) || 0,
-                                })
+                                setUsers(users.map((u) => u.id === user.id ? { ...u, maxShifts: parseInt(e.target.value) || 0 } : u))
                               }
+                              onBlur={() => handleUpdateUser(user)}
                               disabled={currentUser.role === "admin"}
                               className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                             />
@@ -639,11 +635,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           type="number"
                           value={user.aiDailyLimit}
                           onChange={(e) =>
-                            handleUpdateUser({
-                              ...user,
-                              aiDailyLimit: parseInt(e.target.value) || 0,
-                            })
+                            setUsers(users.map((u) => u.id === user.id ? { ...u, aiDailyLimit: parseInt(e.target.value) || 0 } : u))
                           }
+                          onBlur={() => handleUpdateUser(user)}
                           disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
@@ -656,11 +650,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           type="number"
                           value={user.aiWeeklyLimit}
                           onChange={(e) =>
-                            handleUpdateUser({
-                              ...user,
-                              aiWeeklyLimit: parseInt(e.target.value) || 0,
-                            })
+                            setUsers(users.map((u) => u.id === user.id ? { ...u, aiWeeklyLimit: parseInt(e.target.value) || 0 } : u))
                           }
+                          onBlur={() => handleUpdateUser(user)}
                           disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
@@ -673,11 +665,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           type="number"
                           value={user.aiMonthlyLimit}
                           onChange={(e) =>
-                            handleUpdateUser({
-                              ...user,
-                              aiMonthlyLimit: parseInt(e.target.value) || 0,
-                            })
+                            setUsers(users.map((u) => u.id === user.id ? { ...u, aiMonthlyLimit: parseInt(e.target.value) || 0 } : u))
                           }
+                          onBlur={() => handleUpdateUser(user)}
                           disabled={currentUser.role === "admin"}
                           className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
                         />
