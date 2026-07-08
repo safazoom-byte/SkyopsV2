@@ -12,11 +12,17 @@ polyfill({
 
 
 
+window.addEventListener("unhandledrejection", (event) => {
+  if (event.reason && event.reason.message && event.reason.message.includes("Failed to fetch")) {
+    event.preventDefault();
+  }
+});
+
 const origError = console.error;
 console.error = (...args) => {
   const isMatch = (a: any) => 
-    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid'))) ||
-    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid')));
+    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid') || a.includes('Failed to fetch'))) ||
+    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid') || a.message.includes('Failed to fetch')));
   if (args.some(isMatch)) {
     return;
   }
@@ -26,8 +32,8 @@ console.error = (...args) => {
 const origWarn = console.warn;
 console.warn = (...args) => {
   const isMatch = (a: any) => 
-    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid'))) ||
-    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid')));
+    (typeof a === 'string' && (a.includes('Invalid Refresh Token') || a.includes('Refresh Token Not Found') || a.includes('session from storage is not valid') || a.includes('Failed to fetch'))) ||
+    (a instanceof Error && (a.message.includes('Invalid Refresh Token') || a.message.includes('Refresh Token Not Found') || a.message.includes('session from storage is not valid') || a.message.includes('Failed to fetch')));
   if (args.some(isMatch)) {
     return;
   }
@@ -383,10 +389,15 @@ const App: React.FC = () => {
       });
     }
 
+    let lastVisibilitySync = 0;
     const handleVisibilityChange = async () => {
       if (document.visibilityState === "visible" && supabase) {
-        const s = await auth.getSession();
-        if (s) syncCloudData();
+        const now = Date.now();
+        if (now - lastVisibilitySync > 5 * 60 * 1000) { // 5 minutes
+          lastVisibilitySync = now;
+          const s = await auth.getSession();
+          if (s) syncCloudData();
+        }
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -1730,7 +1741,8 @@ const App: React.FC = () => {
                   ...prog,
                   assignments: prog.assignments.filter((a) => a.staffId !== id),
                 }));
-                if (supabase) db.savePrograms(updated);
+                const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
+                if (supabase && changed.length > 0) db.savePrograms(changed);
                 return updated;
               });
             }}
@@ -1752,7 +1764,8 @@ const App: React.FC = () => {
                   ...prog,
                   assignments: [],
                 }));
-                if (supabase) db.savePrograms(updated);
+                const changed = updated.filter((prog, i) => prev[i].assignments.length > 0);
+                if (supabase && changed.length > 0) db.savePrograms(changed);
                 return updated;
               });
             }}
@@ -1835,7 +1848,8 @@ const App: React.FC = () => {
                   ...prog,
                   assignments: prog.assignments.filter((a) => a.shiftId !== id),
                 }));
-                if (supabase) db.savePrograms(updated);
+                const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
+                if (supabase && changed.length > 0) db.savePrograms(changed);
                 return updated;
               });
             }}

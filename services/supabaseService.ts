@@ -604,7 +604,7 @@ export const db = {
     
     // For reads, we can use the regular context or fallback if super admin
     const profile = await this.getUserProfile();
-    let query = client.from("program_versions").select("*").order("created_at", { ascending: false });
+    let query = client.from("program_versions").select("*").order("created_at", { ascending: false }).limit(50);
     
     if (profile?.role === "super_admin" && !profile?.airport_id) {
        // Global view: no filters

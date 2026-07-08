@@ -144,12 +144,13 @@ export const ProgramDisplay: React.FC<Props> = ({
       const manualSaves = updatedVersions.filter(v => !v.isAutoSave);
       
       // Keep max 5 autosaves
+      let removedVersions: ProgramVersion[] = [];
       if (autoSaves.length > 5) {
-        autoSaves.splice(5);
+        removedVersions = removedVersions.concat(autoSaves.splice(5));
       }
       // Keep max 5 manual saves
       if (manualSaves.length > 5) {
-        manualSaves.splice(5);
+        removedVersions = removedVersions.concat(manualSaves.splice(5));
       }
       
       let finalVersions = [...autoSaves, ...manualSaves].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -158,12 +159,15 @@ export const ProgramDisplay: React.FC<Props> = ({
       
       if (supabase) {
         await db.saveProgramVersion(newVersion);
+        for (const v of removedVersions) {
+          await db.deleteProgramVersion(v.id);
+        }
       }
       
       lastSavedStringifiedRef.current = currentStringified;
     };
 
-    const interval = setInterval(doAutoSave, 1 * 60 * 1000); // 1 minute
+    const interval = setInterval(doAutoSave, 5 * 60 * 1000); // 5 minutes
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -2527,7 +2531,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <span className="text-slate-300">-</span>
                     );
                     let cellClass = `px-4 py-2 text-center border-r border-slate-100 ${isCellModified ? "bg-indigo-100/50 shadow-inner" : ""}`;
-                    if (assign) {
+                    if (!isStaffActiveOnDate(s, p.dateString!)) {
+                       content = <span className="text-slate-200">/</span>;
+                       cellClass = `px-4 py-2 text-center border-r border-slate-50 bg-slate-50`;
+                    } else if (assign) {
                       workedCount++;
                       const shift = getShift(assign.shiftId || "");
                       if (shift) {
@@ -3150,6 +3157,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   shifts={shifts}
                   programs={activePrograms}
                   leaveRequests={leaveRequests}
+                  flights={flights}
                   startDate={startDate}
                   endDate={endDate}
                 />
@@ -3251,7 +3259,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                     refProg.assignments.map((a) => a.staffId),
                   );
                   const refOffStaff = activeStaff.filter(
-                    (s) => !refWorkingIds.has(s.id),
+                    (s) => !refWorkingIds.has(s.id) && isStaffActiveOnDate(s, refProg.dateString!),
                   );
                   const refCategories: Record<string, string[]> = {
                     "DAYS OFF": [],

@@ -1,49 +1,37 @@
-import * as React from 'react';
-import { useMemo } from 'react';
-import { Staff, ShiftConfig, DailyProgram, LeaveRequest, isStaffActiveOnDate } from '../types';
-import { AlertCircle, Clock, CalendarX2, UserMinus, ShieldAlert, CheckCircle2, CalendarOff, Hourglass, Users, AlertTriangle } from 'lucide-react';
+import re
 
-import { Flight } from '../types';
+with open("components/ProgramCheck.tsx", "r") as f:
+    code = f.read()
 
-interface ProgramCheckProps {
-  staff: Staff[];
-  shifts: ShiftConfig[];
-  programs: DailyProgram[];
-  leaveRequests: LeaveRequest[];
-  flights: Flight[];
-  startDate: string;
-  endDate: string;
-}
+# Replace the useMemo function body entirely to fix the logical errors.
+search_start = "  const issues = useMemo(() => {"
+search_end = "  }, [staff, shifts, programs, leaveRequests, flights, startDate, endDate]);"
 
-interface Issue {
-  type: 'error' | 'warning';
-  title: string;
-  description: string;
-  staffName: string;
-  staffId: string;
-  date?: string;
-  icon: React.ElementType;
-}
-
-export const ProgramCheck: React.FC<ProgramCheckProps> = ({
-  staff,
-  shifts,
-  programs,
-  leaveRequests,
-  flights,
-  startDate,
-  endDate
-}) => {
-  const issues = useMemo(() => {
+new_usememo = """  const issues = useMemo(() => {
     const foundIssues: Issue[] = [];
     if (!staff.length || !programs.length) return foundIssues;
 
     // Build lookup maps
-    const staffMap = new Map<string, Staff>(staff.map(s => [s.id, s]));
-    const shiftMap = new Map<string, ShiftConfig>(shifts.map(s => [s.id, s]));
+    const staffMap = new Map(staff.map(s => [s.id, s]));
+    const shiftMap = new Map(shifts.map(s => [s.id, s]));
 
     const getShiftsForDate = (allShifts: ShiftConfig[], dateString: string) => {
-      return allShifts.filter((s) => s.pickupDate === dateString);
+      const d = new Date(dateString);
+      const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+      return allShifts.filter((s) => {
+        if (!s.isActive) return false;
+        if (s.pattern === "Once" && s.pickupDate === dateString) return true;
+        if (s.pattern === "Daily") {
+          return d >= new Date(s.pickupDate) && (!s.endDate || d <= new Date(s.endDate));
+        }
+        if (s.pattern === "Weekly" && s.daysOfWeek?.includes(dayName)) {
+          return d >= new Date(s.pickupDate) && (!s.endDate || d <= new Date(s.endDate));
+        }
+        if (s.pattern === "Custom" && s.customDates?.includes(dateString)) {
+          return true;
+        }
+        return false;
+      });
     };
 
     interface ScheduledDuty {
@@ -380,78 +368,13 @@ export const ProgramCheck: React.FC<ProgramCheckProps> = ({
       if (a.type !== b.type) return a.type === 'error' ? -1 : 1;
       return a.staffName.localeCompare(b.staffName);
     });
-  }, [staff, shifts, programs, leaveRequests, flights, startDate, endDate]);
+  }, [staff, shifts, programs, leaveRequests, flights, startDate, endDate]);"""
 
-  const errorCount = issues.filter(i => i.type === 'error').length;
-  const warningCount = issues.filter(i => i.type === 'warning').length;
+start_idx = code.find(search_start)
+end_idx = code.find(search_end) + len(search_end)
 
-  return (
-    <div className="max-w-6xl mx-auto space-y-6 md:space-y-12 animate-in fade-in duration-500">
-      <div className="bg-white p-6 md:p-10 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div>
-          <h2 className="text-3xl font-black italic uppercase text-slate-900 tracking-tighter">
-            Program Check
-          </h2>
-          <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2 flex items-center gap-2">
-            <AlertCircle size={14} /> Automated Roster Validation
-          </p>
-        </div>
-        <div className="flex gap-4">
-          <div className="flex flex-col items-center bg-rose-50 px-6 py-3 rounded-2xl border border-rose-100">
-            <span className="text-2xl font-black text-rose-600">{errorCount}</span>
-            <span className="text-[9px] font-black uppercase tracking-widest text-rose-400">Errors</span>
-          </div>
-          <div className="flex flex-col items-center bg-amber-50 px-6 py-3 rounded-2xl border border-amber-100">
-            <span className="text-2xl font-black text-amber-600">{warningCount}</span>
-            <span className="text-[9px] font-black uppercase tracking-widest text-amber-400">Warnings</span>
-          </div>
-        </div>
-      </div>
+if start_idx != -1 and end_idx != -1:
+    code = code[:start_idx] + new_usememo + code[end_idx:]
 
-      <div className="bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-100">
-        {issues.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-emerald-500 gap-4">
-            <CheckCircle2 size={64} className="opacity-50" />
-            <h3 className="text-2xl font-black uppercase tracking-tighter">All Clear</h3>
-            <p className="text-sm font-bold text-slate-400">No issues found in the selected period.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {issues.map((issue, idx) => (
-              <div 
-                key={idx} 
-                className={`flex items-start gap-4 p-5 rounded-2xl border ${
-                  issue.type === 'error' 
-                    ? 'bg-rose-50/50 border-rose-100' 
-                    : 'bg-amber-50/50 border-amber-100'
-                }`}
-              >
-                <div className={`p-3 rounded-xl ${
-                  issue.type === 'error' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
-                }`}>
-                  <issue.icon size={24} />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className={`text-sm font-black uppercase tracking-tight ${
-                      issue.type === 'error' ? 'text-rose-700' : 'text-amber-700'
-                    }`}>
-                      {issue.title}
-                    </h4>
-                    {issue.date && (
-                      <span className="text-xs font-bold text-slate-400 bg-white px-2 py-1 rounded-lg border border-slate-100">
-                        {issue.date}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm font-bold text-slate-700 mb-2">{issue.staffName}</p>
-                  <p className="text-xs font-medium text-slate-500">{issue.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
+with open("components/ProgramCheck.tsx", "w") as f:
+    f.write(code)

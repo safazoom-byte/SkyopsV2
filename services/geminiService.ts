@@ -7,6 +7,7 @@ import {
   ShiftConfig,
   Skill,
   Flight,
+  isStaffActiveOnDate,
 } from "../types";
 import { AVAILABLE_SKILLS } from "../constants";
 import { auth } from "./supabaseService";
@@ -236,7 +237,17 @@ export const generateAIProgram = async (
   constraintsLog: string,
   config: { numDays: number; minRestHours: number; startDate: string },
 ): Promise<BuildResult> => {
-  data.staff = data.staff.filter((s) => s.isActive !== false);
+  const periodDates: string[] = [];
+  for (let i = 0; i < config.numDays; i++) {
+    const d = new Date(config.startDate);
+    d.setDate(d.getDate() + i);
+    periodDates.push(d.toISOString().split("T")[0]);
+  }
+
+  data.staff = data.staff.filter((s) => {
+    if (s.isActive === false) return false;
+    return periodDates.some(dateStr => isStaffActiveOnDate(s, dateStr));
+  });
   const programStart = new Date(config.startDate);
   const programEnd = new Date(config.startDate);
   programEnd.setDate(programStart.getDate() + config.numDays - 1);
@@ -269,19 +280,12 @@ export const generateAIProgram = async (
         const onLeave = data.leaveRequests?.some(
           (l) => l.staffId === s.id && l.startDate <= dStr && l.endDate >= dStr,
         );
-        let inContract = false;
-        if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-          inContract = s.rosterPeriods.some(
-            (p) => dStr >= p.start && dStr <= p.end,
-          );
-        } else if (s.workFromDate && s.workToDate) {
-          inContract = dStr >= s.workFromDate && dStr <= s.workToDate;
-        }
-        if (!onLeave && inContract) rosterCount++;
+        if (!onLeave && isStaffActiveOnDate(s, dStr)) rosterCount++;
       });
 
     dailyLocalDemand[dayOffset] = Math.max(0, targetHeadcount - rosterCount);
-    dailySurplus[dayOffset] = localStaff.length - dailyLocalDemand[dayOffset];
+    const activeLocalToday = localStaff.filter(s => isStaffActiveOnDate(s, dStr)).length;
+    dailySurplus[dayOffset] = activeLocalToday - dailyLocalDemand[dayOffset];
   }
 
   // 2. Calculate Target Off Quotas
@@ -442,17 +446,8 @@ export const generateAIProgram = async (
           );
           if (onLeave) return false;
 
-          // 2. Check Contract (Roster)
-          if (s.type === "Roster") {
-            if (s.rosterPeriods && s.rosterPeriods.length > 0) {
-              const inContract = s.rosterPeriods.some(
-                (p) => dStr >= p.start && dStr <= p.end,
-              );
-              if (!inContract) return false;
-            } else if (s.workFromDate && s.workToDate) {
-              if (dStr < s.workFromDate || dStr > s.workToDate) return false;
-            }
-          }
+          // 2. Check Active Status / Contract
+          if (!isStaffActiveOnDate(s, dStr)) return false;
 
           // 3. Check AI Planned Days Off (Local)
           const isPlannedOff =
