@@ -233,7 +233,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
 
   const sortedUsersList = [...users]
     .filter(u => currentUser.role === "super_admin" || u.role !== "super_admin")
-    .filter(u => u.email?.toLowerCase() !== "safazoom@gmail.com")
+    .filter(u => {
+      if (u.email?.toLowerCase() === "safazoom@gmail.com") {
+        return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
+      }
+      return true;
+    })
     .sort((a, b) => {
     if ((a.role === "super_admin" || a.role === "admin") && (b.role === "planner")) return -1;
     if ((a.role === "planner") && (b.role === "super_admin" || b.role === "admin")) return 1;

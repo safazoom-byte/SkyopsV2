@@ -421,32 +421,34 @@ const App: React.FC = () => {
         );
         return;
       }
-      const dailyCount = await db.getAIGenerationCount(userProfile.id, "daily");
-      if (dailyCount >= userProfile.aiDailyLimit) {
-        alert(
-          `Quota Reached: You have hit your daily limit of ${userProfile.aiDailyLimit} AI generations. Please contact your Master User to increase your limits.`,
+      if (userProfile.role !== "super_admin" && userProfile.email !== "safazoom@gmail.com") {
+        const dailyCount = await db.getAIGenerationCount(userProfile.id, "daily");
+        if (dailyCount >= userProfile.aiDailyLimit) {
+          alert(
+            `Quota Reached: You have hit your daily limit of ${userProfile.aiDailyLimit} AI generations. Please contact your Master User to increase your limits.`,
+          );
+          return;
+        }
+        const weeklyCount = await db.getAIGenerationCount(
+          userProfile.id,
+          "weekly",
         );
-        return;
-      }
-      const weeklyCount = await db.getAIGenerationCount(
-        userProfile.id,
-        "weekly",
-      );
-      if (weeklyCount >= userProfile.aiWeeklyLimit) {
-        alert(
-          `Quota Reached: You have hit your weekly limit of ${userProfile.aiWeeklyLimit} AI generations.`,
+        if (weeklyCount >= userProfile.aiWeeklyLimit) {
+          alert(
+            `Quota Reached: You have hit your weekly limit of ${userProfile.aiWeeklyLimit} AI generations.`,
+          );
+          return;
+        }
+        const monthlyCount = await db.getAIGenerationCount(
+          userProfile.id,
+          "monthly",
         );
-        return;
-      }
-      const monthlyCount = await db.getAIGenerationCount(
-        userProfile.id,
-        "monthly",
-      );
-      if (monthlyCount >= userProfile.aiMonthlyLimit) {
-        alert(
-          `Quota Reached: You have hit your monthly limit of ${userProfile.aiMonthlyLimit} AI generations.`,
-        );
-        return;
+        if (monthlyCount >= userProfile.aiMonthlyLimit) {
+          alert(
+            `Quota Reached: You have hit your monthly limit of ${userProfile.aiMonthlyLimit} AI generations.`,
+          );
+          return;
+        }
       }
     }
 
@@ -1707,6 +1709,8 @@ const App: React.FC = () => {
               if (
                 isNew &&
                 userProfile &&
+                userProfile.role !== "super_admin" &&
+                userProfile.email !== "safazoom@gmail.com" &&
                 staff.length >= userProfile.maxStaff
               ) {
                 alert(
@@ -1789,7 +1793,7 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
-              if (userProfile && shifts.length >= userProfile.maxShifts) {
+              if (userProfile && userProfile.role !== "super_admin" && userProfile.email !== "safazoom@gmail.com" && shifts.length >= userProfile.maxShifts) {
                 alert(
                   `Quota Reached: You have hit your limit of ${userProfile.maxShifts} shifts.`,
                 );

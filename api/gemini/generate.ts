@@ -8,11 +8,9 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
-
   if (req.method !== 'POST') {
     return res.status(405).json({ error: "Method not allowed" });
   }
-
   try {
     // Auth check
     const authHeader = req.headers.authorization;
@@ -20,11 +18,16 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: "Unauthorized" });
     }
     const token = authHeader.split(" ")[1];
+    
+    const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+    const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "";
+
     const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || "",
-      process.env.VITE_SUPABASE_ANON_KEY || "",
+      url,
+      anonKey,
       { auth: { autoRefreshToken: false, persistSession: false } }
     );
+
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     
     if (authError || !user) {
@@ -48,7 +51,8 @@ export default async function handler(req: any, res: any) {
     const { model, contents, config } = req.body;
     
     // Basic allow-list validation
-    const allowedModels = ["gemini-3.0-flash", "gemini-3.0-pro", "gemini-3.0-flash-8b", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-pro-exp"];
+    const allowedModels = ["gemini-3.0-flash", "gemini-3.0-pro", "gemini-3.0-flash-8b", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-pro-exp", "gemini-3.1-pro-preview"];
+    
     if (!model || !allowedModels.includes(model.replace(/^models\//, ""))) {
        return res.status(400).json({ error: "Invalid model requested" });
     }

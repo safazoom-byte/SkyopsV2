@@ -800,7 +800,14 @@ export const db = {
           console.warn("Supabase select error:", error);
         }
         if (data) {
-          const filteredData = data.filter((d) => d.email?.toLowerCase() !== "safazoom@gmail.com");
+          const session = await auth.getSession();
+          const currentUser = session?.user;
+          const filteredData = data.filter((d) => {
+             if (d.email?.toLowerCase() === "safazoom@gmail.com") {
+                return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
+             }
+             return true;
+          });
           return filteredData.map((d: any) => ({
             id: d.id,
             email: d.email,
@@ -1038,7 +1045,14 @@ export const db = {
 
         const { data } = await query;
         if (data && data.length > 0) {
-          const filteredData = data.filter((d) => d.user_email?.toLowerCase() !== "safazoom@gmail.com");
+          const session = await auth.getSession();
+          const currentUser = session?.user;
+          const filteredData = data.filter((d) => {
+             if (d.user_email?.toLowerCase() === "safazoom@gmail.com") {
+                return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
+             }
+             return true;
+          });
           return filteredData.map((d: any) => ({
             id: d.id,
             userId: d.user_id,

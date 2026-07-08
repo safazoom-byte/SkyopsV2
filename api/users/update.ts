@@ -30,6 +30,9 @@ export default async function handler(req: any, res: any) {
     const isAdmin = callerProfile?.role === "admin";
     
     if (!isSelf && !isSuperAdmin && !isAdmin) return res.status(403).json({ error: "Forbidden" });
+    if (profile.email === "safazoom@gmail.com" && caller.email !== "safazoom@gmail.com") {
+        return res.status(403).json({ error: "Cannot modify master user" });
+    }
     
     if (isAdmin && !isSuperAdmin && !isSelf) {
        const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", profile.id).single();

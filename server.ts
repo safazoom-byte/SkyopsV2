@@ -227,6 +227,9 @@ async function startServer() {
       if (!isSelf && !isSuperAdmin && !isAdmin) {
          return res.status(403).json({ error: "Forbidden" });
       }
+      if (profile.email === "safazoom@gmail.com" && caller.email !== "safazoom@gmail.com") {
+         return res.status(403).json({ error: "Cannot modify master user" });
+      }
       
       if (isAdmin && !isSuperAdmin && !isSelf) {
          // Admins can only update planners
