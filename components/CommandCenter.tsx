@@ -12,8 +12,9 @@ import {
   Trash2,
   X,
   PlaneTakeoff,
+  Star,
 } from "lucide-react";
-import { UserProfile, AuditLog, Flight, ShiftConfig } from "../types";
+import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
 import { db, auth } from "../services/supabaseService";
 import { AirlineManager } from "./AirlineManager";
 
@@ -42,6 +43,8 @@ interface CommandCenterProps {
   shifts?: ShiftConfig[];
   startDate?: string;
   endDate?: string;
+  staff?: Staff[];
+  onUpdateStaff?: (s: Staff) => void;
 }
 
 export const CommandCenter: React.FC<CommandCenterProps> = ({
@@ -50,8 +53,10 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   shifts = [],
   startDate,
   endDate,
+  staff = [],
+  onUpdateStaff,
 }) => {
-  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines">(() => currentUser.role === "super_admin" ? "audit" : "users");
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines" | "ratings">(() => currentUser.role === "super_admin" ? "audit" : "users");
   const [newAirportName, setNewAirportName] = useState("");
   const [newAirportCode, setNewAirportCode] = useState("");
 
@@ -59,6 +64,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [ratingsSearch, setRatingsSearch] = useState("");
   const [airports, setAirports] = useState<any[]>([]);
   const [newUserAirportId, setNewUserAirportId] = useState("");
 
@@ -245,6 +251,15 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
     return (a.email || "").localeCompare(b.email || "");
   });
 
+  const filteredTrafficStaff = (staff || [])
+    .filter((s) => !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver)
+    .filter(
+      (s) =>
+        s.name.toLowerCase().includes(ratingsSearch.toLowerCase()) ||
+        s.initials.toLowerCase().includes(ratingsSearch.toLowerCase())
+    )
+    .sort((a, b) => a.initials.localeCompare(b.initials));
+
   if (currentUser.role === "planner") {
     return (
       <div className="flex flex-col items-center justify-center h-96 text-slate-500">
@@ -304,6 +319,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             <PlaneTakeoff size={14} className="inline mr-1 md:mr-2" /> Airlines
           </button>
           )}
+          <button
+            onClick={() => setActiveTab("ratings")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "ratings" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Star size={14} className="inline mr-1 md:mr-2" /> C&G Rating System
+          </button>
           {currentUser.role === "super_admin" && (
           <button
             onClick={() => setActiveTab("system")}
@@ -706,6 +727,121 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         </div>
       ) : activeTab === "airlines" ? (
         <AirlineManager flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
+      ) : activeTab === "ratings" ? (
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
+            <div>
+              <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider animate-in fade-in">
+                Traffic Staff C&G Rating System
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Rate traffic staff from 0% to 100%. Shift C&G Power is calculated as the average rating of assigned traffic staff.
+              </p>
+            </div>
+            <div className="relative w-full sm:w-auto">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Search staff..."
+                value={ratingsSearch}
+                onChange={(e) => setRatingsSearch(e.target.value)}
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
+              />
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                  <th className="px-6 py-3 w-20">S/N</th>
+                  <th className="px-6 py-3 w-32">Initials</th>
+                  <th className="px-6 py-3">Name</th>
+                  <th className="px-6 py-3 w-48 text-center">Roles</th>
+                  <th className="px-6 py-3 w-64 text-center">C&G Rating (0-100%)</th>
+                </tr>
+              </thead>
+              <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                {filteredTrafficStaff.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 font-bold">
+                      No traffic staff members found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTrafficStaff.map((member, sIdx) => {
+                    const currentVal = member.rating !== undefined ? member.rating : 100;
+                    const roles = [
+                      member.isShiftLeader && "SL",
+                      member.isLoadControl && "LC",
+                      member.isRamp && "RMP",
+                      member.isOps && "OPS",
+                      member.isLostFound && "LF",
+                    ].filter(Boolean).join(" + ") || "Traffic";
+
+                    return (
+                      <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 font-bold text-slate-400">{sIdx + 1}</td>
+                        <td className="px-6 py-4">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-mono font-black text-[10px]">
+                            {member.initials}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-slate-900">{member.name}</td>
+                        <td className="px-6 py-4 text-center text-slate-500 font-semibold">{roles}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-4 justify-center">
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={currentVal}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                if (onUpdateStaff) {
+                                  onUpdateStaff({
+                                    ...member,
+                                    rating: val
+                                  });
+                                }
+                              }}
+                              className="w-36 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none"
+                            />
+                            <div className="flex items-center gap-1 w-16">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={currentVal}
+                                onChange={(e) => {
+                                  let val = parseInt(e.target.value, 10);
+                                  if (isNaN(val)) val = 0;
+                                  if (val < 0) val = 0;
+                                  if (val > 100) val = 100;
+                                  if (onUpdateStaff) {
+                                    onUpdateStaff({
+                                      ...member,
+                                      rating: val
+                                    });
+                                  }
+                                }}
+                                className="w-12 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                              />
+                              <span className="text-xs font-bold text-slate-400">%</span>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">

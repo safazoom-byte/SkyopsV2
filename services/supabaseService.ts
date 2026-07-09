@@ -233,6 +233,7 @@ export const db = {
             workToDate: s.work_to_date,
             rosterPeriods,
             isActive: s.is_active !== false,
+            rating: s.rating !== undefined && s.rating !== null ? s.rating : 100,
           };
         }),
         shifts: (shRes.data || []).map((s: any) => ({
@@ -348,6 +349,7 @@ export const db = {
         work_from_date: s.workFromDate || null,
         work_to_date: s.workToDate || null,
         is_active: s.isActive !== false,
+        rating: s.rating !== undefined ? s.rating : 100,
       });
     } catch (e) {
       console.warn("Failed to upsert staff:", e);

@@ -3350,6 +3350,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                               <th className="px-4 py-3 w-24 text-center">
                                 HC / Max
                               </th>
+                              <th className="px-4 py-3 w-24 text-center">
+                                C&G Power
+                              </th>
                               <th className="px-4 py-3">
                                 Personnel & Assigned Roles
                               </th>
@@ -3407,6 +3410,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 const isShiftModified =
                                   curShiftAssig !== refShiftAssig;
 
+                                const assignedTraffic = assignments.filter((a) => {
+                                  const st = getStaff(a.staffId);
+                                  return st && !st.isLabour && !st.isSecurity && !st.isAccountant && !st.isDriver;
+                                });
+                                const avgRating = assignedTraffic.length > 0
+                                  ? Math.round(
+                                      assignedTraffic.reduce((sum, a) => {
+                                        const st = getStaff(a.staffId);
+                                        return sum + (st?.rating !== undefined && st?.rating !== null ? st.rating : 100);
+                                      }, 0) / assignedTraffic.length
+                                    )
+                                  : 0;
+
                                 return (
                                   <tr
                                     key={shift.id}
@@ -3435,6 +3451,20 @@ export const ProgramDisplay: React.FC<Props> = ({
                                       className={`px-4 py-3 text-center font-bold ${isOver ? "text-rose-500" : isFull ? "text-emerald-500" : "text-amber-500"}`}
                                     >
                                       {nonLabourCount} / {shift.maxStaff}
+                                    </td>
+                                    <td className="px-4 py-3 text-center font-bold">
+                                      {assignedTraffic.length > 0 ? (
+                                        <span className={`inline-block px-2 py-1 rounded-md text-[11px] ${
+                                          avgRating >= 85 ? "bg-emerald-100 text-emerald-800" :
+                                          avgRating >= 70 ? "bg-blue-100 text-blue-800" :
+                                          avgRating >= 50 ? "bg-amber-100 text-amber-800" :
+                                          "bg-rose-100 text-rose-800"
+                                        }`}>
+                                          {avgRating}%
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-300">-</span>
+                                      )}
                                     </td>
                                     <td className="px-4 py-3">
                                       <div className="flex flex-col gap-2">
