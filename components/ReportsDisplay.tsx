@@ -74,6 +74,8 @@ export function ReportsDisplay({
        s["Lieu leave"] = [...new Set(s["Lieu leave"] || [])].sort();
        s["Sick leave"] = [...new Set(s["Sick leave"] || [])].sort();
        s["Roster leave"] = [...new Set(s["Roster leave"] || [])].sort();
+       s["Day off"] = [...new Set(s["Day off"] || [])].sort();
+       s.total = (s["Annual leave"]?.length || 0) + (s["Sick leave"]?.length || 0) + (s["Lieu leave"]?.length || 0) + (s["Roster leave"]?.length || 0) + (s["Day off"]?.length || 0);
     });
 
     return summary;
@@ -101,6 +103,7 @@ export function ReportsDisplay({
 
   const departmentLeaveData = useMemo(() => {
     const counts = {
+      "Day off": 0,
       "Annual leave": 0,
       "Sick leave": 0,
       "Lieu leave": 0,
@@ -110,6 +113,7 @@ export function ReportsDisplay({
     filteredStaff.forEach(s => {
        const sum = leaveSummary[s.id];
        if (sum) {
+         counts["Day off"] += sum["Day off"]?.length || 0;
          counts["Annual leave"] += sum["Annual leave"]?.length || 0;
          counts["Sick leave"] += sum["Sick leave"]?.length || 0;
          counts["Lieu leave"] += sum["Lieu leave"]?.length || 0;
@@ -118,6 +122,7 @@ export function ReportsDisplay({
     });
 
     return [
+      { name: "Day off", value: counts["Day off"], color: "#10b981" },
       { name: "Annual leave", value: counts["Annual leave"], color: "#a855f7" },
       { name: "Sick leave", value: counts["Sick leave"], color: "#f43f5e" },
       { name: "Lieu leave", value: counts["Lieu leave"], color: "#f59e0b" },
@@ -128,7 +133,7 @@ export function ReportsDisplay({
   const monthlyLeaveData = useMemo(() => {
     const year = new Date(reportStartDate).getFullYear() || new Date().getFullYear();
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthData = months.map(m => ({ name: m, "Annual leave": 0, "Sick leave": 0, "Lieu leave": 0, "Roster leave": 0 }));
+    const monthData = months.map(m => ({ name: m, "Day off": 0, "Annual leave": 0, "Sick leave": 0, "Lieu leave": 0, "Roster leave": 0 }));
     
     leaveRequests.forEach(req => {
        const start = new Date(req.startDate);
@@ -138,7 +143,7 @@ export function ReportsDisplay({
        while (currentDate <= end) {
          if (currentDate.getFullYear() === year) {
            const monthIndex = currentDate.getMonth();
-           if (req.type === "Annual leave" || req.type === "Sick leave" || req.type === "Lieu leave" || req.type === "Roster leave") {
+           if (req.type === "Day off" || req.type === "Annual leave" || req.type === "Sick leave" || req.type === "Lieu leave" || req.type === "Roster leave") {
               monthData[monthIndex][req.type] += 1;
            }
          }
@@ -245,6 +250,7 @@ export function ReportsDisplay({
                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
                 />
                 <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold' }} />
+                <Bar dataKey="Day off" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Annual leave" stackId="a" fill="#a855f7" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Sick leave" stackId="a" fill="#f43f5e" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Lieu leave" stackId="a" fill="#f59e0b" radius={[0, 0, 0, 0]} />
@@ -299,6 +305,7 @@ export function ReportsDisplay({
             <thead>
               <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
                 <th className="px-6 py-4">Staff Member</th>
+                <th className="px-6 py-4 text-center">Day Off</th>
                 <th className="px-6 py-4 text-center">Annual Leave</th>
                 <th className="px-6 py-4 text-center">Sick Leave</th>
                 <th className="px-6 py-4 text-center">Lieu Leave</th>
@@ -328,6 +335,12 @@ export function ReportsDisplay({
                             <div className="text-xs text-slate-500 font-mono">{s.type}</div>
                           </div>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 text-center align-top">
+                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${summary?.["Day off"]?.length ? "bg-emerald-100 text-emerald-700" : "text-slate-300"}`}>
+                          {summary?.["Day off"]?.length || 0} days
+                        </span>
+                        {renderDates(summary?.["Day off"])}
                       </td>
                       <td className="px-6 py-4 text-center align-top">
                         <span className={`px-3 py-1 rounded-full text-xs font-bold ${summary?.["Annual leave"]?.length ? "bg-purple-100 text-purple-700" : "text-slate-300"}`}>

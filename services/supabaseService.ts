@@ -816,6 +816,7 @@ export const db = {
         if (data) {
           const session = await auth.getSession();
           const currentUser = session?.user;
+          console.log("Current User Email in getAuditLogs:", currentUser?.email);
           const filteredData = data.filter((d) => {
              if (d.email?.toLowerCase() === "safazoom@gmail.com") {
                 return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
@@ -1048,9 +1049,9 @@ export const db = {
           .from("audit_logs")
           .select("*")
           .order("created_at", { ascending: false })
-          .limit(500);
+          .limit(2000);
           
-        if (profile?.airport_id) {
+        if (profile?.role !== "super_admin" && profile?.airport_id) {
           query = query.eq("airport_id", profile.airport_id);
         } else if (profile?.role !== "super_admin") {
           const session = await auth.getSession();
@@ -1061,13 +1062,7 @@ export const db = {
         if (data && data.length > 0) {
           const session = await auth.getSession();
           const currentUser = session?.user;
-          const filteredData = data.filter((d) => {
-             if (d.user_email?.toLowerCase() === "safazoom@gmail.com") {
-                return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
-             }
-             return true;
-          });
-          return filteredData.map((d: any) => ({
+          return data.map((d: any) => ({
             id: d.id,
             userId: d.user_id,
             userEmail: d.user_email,

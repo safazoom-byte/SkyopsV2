@@ -13,7 +13,7 @@ import {
   X,
   PlaneTakeoff,
   Star,
-  Download,
+  Download, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
 import { db, auth, supabase } from "../services/supabaseService";
@@ -65,6 +65,10 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [expandedUsers, setExpandedUsers] = useState<Record<string, boolean>>({});
+  const toggleUserExpanded = (email: string) => setExpandedUsers(prev => ({...prev, [email]: !prev[email]}));
+  
+  
   const [ratingsSearch, setRatingsSearch] = useState("");
   const [airports, setAirports] = useState<any[]>([]);
   const [newUserAirportId, setNewUserAirportId] = useState("");
@@ -499,7 +503,13 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   key={email}
                   className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm"
                 >
-                  <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex items-center gap-3">
+                  <div 
+                    className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex items-center gap-3 cursor-pointer hover:bg-slate-200 transition-colors"
+                    onClick={() => toggleUserExpanded(email)}
+                  >
+                    <div className="text-slate-400">
+                      {expandedUsers[email] ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                    </div>
                     <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs uppercase">
                       {email.substring(0, 2)}
                     </div>
@@ -508,7 +518,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       {logsByUser[email].length} Actions
                     </span>
                   </div>
-                  <div className="divide-y divide-slate-100">
+                  {expandedUsers[email] && (
+                  <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
                     {logsByUser[email].map((log) => (
                       <div
                         key={log.id}
@@ -543,6 +554,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               ))
             )}
