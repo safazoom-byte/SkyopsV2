@@ -321,6 +321,105 @@ export const StaffManager: React.FC<Props> = ({
     return !!member[field];
   };
 
+  const renderPerformanceRatings = (
+    currentStaff: Partial<Staff>,
+    setStaff: (updater: (prev: any) => any) => void
+  ) => {
+    const isTraf = !currentStaff.isLabour && !currentStaff.isSecurity && !currentStaff.isAccountant && !currentStaff.isDriver;
+    if (!isTraf) return null;
+
+    const renderSlider = (
+      label: string,
+      description: string,
+      valueKey: keyof Staff,
+      colorTheme: "blue" | "rose" | "emerald" | "indigo" | "amber" | "purple"
+    ) => {
+      const themes = {
+        blue: {
+          bg: "bg-blue-50/50", border: "border-blue-100/50", title: "text-blue-900", desc: "text-blue-500", val: "text-blue-700", track: "bg-blue-200", accent: "accent-blue-600"
+        },
+        rose: {
+          bg: "bg-rose-50/50", border: "border-rose-100/50", title: "text-rose-900", desc: "text-rose-500", val: "text-rose-700", track: "bg-rose-200", accent: "accent-rose-600"
+        },
+        emerald: {
+          bg: "bg-emerald-50/50", border: "border-emerald-100/50", title: "text-emerald-900", desc: "text-emerald-500", val: "text-emerald-700", track: "bg-emerald-200", accent: "accent-emerald-600"
+        },
+        indigo: {
+          bg: "bg-indigo-50/50", border: "border-indigo-100/50", title: "text-indigo-900", desc: "text-indigo-500", val: "text-indigo-700", track: "bg-indigo-200", accent: "accent-indigo-600"
+        },
+        amber: {
+          bg: "bg-amber-50/50", border: "border-amber-100/50", title: "text-amber-900", desc: "text-amber-500", val: "text-amber-700", track: "bg-amber-200", accent: "accent-amber-600"
+        },
+        purple: {
+          bg: "bg-purple-50/50", border: "border-purple-100/50", title: "text-purple-900", desc: "text-purple-500", val: "text-purple-700", track: "bg-purple-200", accent: "accent-purple-600"
+        }
+      };
+      
+      const theme = themes[colorTheme];
+      const value = (currentStaff[valueKey] as number) !== undefined && (currentStaff[valueKey] as number) !== null ? (currentStaff[valueKey] as number) : 100;
+      
+      return (
+        <div key={valueKey} className={`${theme.bg} p-4 rounded-xl border ${theme.border} mb-3`}>
+          <div className="flex justify-between items-start mb-2">
+            <div>
+              <h5 className={`text-sm font-bold ${theme.title}`}>{label}</h5>
+              <p className={`text-xs ${theme.desc}`}>{description}</p>
+            </div>
+            <span className={`text-lg font-black ${theme.val}`}>{value}%</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setStaff((prev: any) => {
+                  if (!prev) return prev;
+                  return { ...prev, [valueKey]: Math.max(0, value - 5) };
+                });
+              }}
+              className={`w-10 h-10 shrink-0 rounded-full bg-white shadow-sm flex items-center justify-center font-bold text-lg ${theme.val} hover:scale-105 transition-transform`}
+            >-</button>
+            <div className={`flex-1 h-2 ${theme.track} rounded-lg overflow-hidden relative`}>
+              <div className={`absolute left-0 top-0 h-full ${theme.accent.replace('accent-', 'bg-')} transition-all`} style={{ width: `${value}%` }}></div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setStaff((prev: any) => {
+                  if (!prev) return prev;
+                  return { ...prev, [valueKey]: Math.min(100, value + 5) };
+                });
+              }}
+              className={`w-10 h-10 shrink-0 rounded-full bg-white shadow-sm flex items-center justify-center font-bold text-lg ${theme.val} hover:scale-105 transition-transform`}
+            >+</button>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="space-y-4 pt-6 border-t border-slate-50 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[9px] md:text-[10px] font-black text-slate-600 uppercase flex flex-col gap-1">
+            <span>Performance Ratings</span>
+            <span className="text-[8px] font-medium text-slate-400 normal-case">
+              Configure skill proficiency rates (0-100%).
+            </span>
+          </p>
+          <div className="w-10 h-10 rounded-full border-2 border-amber-400 bg-amber-50 flex items-center justify-center flex-col shrink-0">
+            <span className="text-amber-600 font-black text-xs leading-none">{(currentStaff.rating !== undefined && currentStaff.rating !== null ? currentStaff.rating : 100)}</span>
+            <span className="text-amber-600 font-bold text-[7px] leading-none uppercase">GEN</span>
+          </div>
+        </div>
+
+        {renderSlider("C&G Rating", "Speed & quality of passenger processing", "rating", "blue")}
+        {currentStaff.isShiftLeader && renderSlider("Shift Leader Strength", "Leadership • Speed coaching • OPS • PAX", "ratingSL", "rose")}
+        {currentStaff.isOps && renderSlider("Operations Strength", "Coordination • Communication • Dispatch", "ratingOps", "emerald")}
+        {currentStaff.isLostFound && renderSlider("Lost & Found Strength", "Customer service • System proficiency", "ratingLF", "indigo")}
+        {currentStaff.isRamp && renderSlider("Ramp Strength", "Turnaround speed • Equipment handling", "ratingRamp", "amber")}
+              </div>
+    );
+  };
+
   const exportStaffCSV = async () => {
     if (!staff || !staff.length) return;
     const data = staff.map((s) => ({
@@ -579,23 +678,7 @@ export const StaffManager: React.FC<Props> = ({
                     <option value="Roster">Roster (Contract-Based)</option>
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-[8px] md:text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 flex justify-between">
-                    <span>Power Rate</span>
-                    <span className="text-blue-600">{newStaff.powerRate}%</span>
-                  </label>
-                  <div className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 rounded-2xl md:rounded-[2rem] flex items-center">
-                    <input
-                      type="range"
-                      name="powerRate"
-                      min="50"
-                      max="100"
-                      className="w-full accent-blue-600 cursor-pointer h-1.5"
-                      value={newStaff.powerRate}
-                      onChange={(e) => handleInputChange(e, false)}
-                    />
-                  </div>
-                </div>
+                
               </div>
 
               {newStaff.type === "Roster" && (
@@ -652,6 +735,7 @@ export const StaffManager: React.FC<Props> = ({
                   })}
                 </div>
               </div>
+              
               <button
                 type="submit"
                 className="w-full py-3 md:py-4 bg-slate-950 text-white rounded-xl md:rounded-2xl font-black uppercase italic tracking-widest shadow-xl hover:bg-blue-600 text-[10px] transition-all active:scale-95"
@@ -737,55 +821,7 @@ export const StaffManager: React.FC<Props> = ({
                         </span>
                       </div>
                     </div>
-                    <div className="relative w-10 h-10 md:w-12 md:h-12 flex items-center justify-center shrink-0">
-                      <svg className="w-full h-full -rotate-90">
-                        <circle
-                          cx="20"
-                          cy="20"
-                          r="16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          className="text-slate-100 md:hidden"
-                        />
-                        <circle
-                          cx="24"
-                          cy="24"
-                          r="20"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                          className="hidden md:block text-slate-100"
-                        />
-
-                        <circle
-                          cx="20"
-                          cy="20"
-                          r="16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeDasharray="100.48"
-                          strokeDashoffset={100.48 - (100.48 * power) / 100}
-                          className={`md:hidden ${isRoster ? "text-amber-500" : "text-blue-600"}`}
-                        />
-                        <circle
-                          cx="24"
-                          cy="24"
-                          r="20"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                          strokeDasharray="125.6"
-                          strokeDashoffset={125.6 - (125.6 * power) / 100}
-                          className={`hidden md:block ${isRoster ? "text-amber-500" : "text-blue-600"}`}
-                        />
-                      </svg>
-                      <span className="absolute text-[7px] md:text-[8px] font-black">
-                        {power}%
-                      </span>
                     </div>
-                  </div>
 
                   <div className="p-6 md:p-8 flex-1 flex flex-col justify-between space-y-6 md:space-y-8">
                     <div className="space-y-4 md:space-y-6">
@@ -1182,17 +1218,7 @@ export const StaffManager: React.FC<Props> = ({
                   <option value="Local">Local (Permanent)</option>
                   <option value="Roster">Roster (Contract)</option>
                 </select>
-                <div className="px-5 py-4 bg-slate-50 border rounded-2xl flex items-center">
-                  <input
-                    type="range"
-                    name="powerRate"
-                    min="50"
-                    max="100"
-                    className="w-full accent-indigo-600"
-                    value={editingStaff.powerRate}
-                    onChange={(e) => handleInputChange(e, true)}
-                  />
-                </div>
+                
               </div>
 
               <div className="bg-slate-50 p-5 rounded-3xl border border-slate-200 mb-6 mt-4">
@@ -1282,6 +1308,7 @@ export const StaffManager: React.FC<Props> = ({
                   })}
                 </div>
               </div>
+              
               <div className="flex flex-col sm:flex-row gap-4 pt-4">
                 <button
                   type="button"

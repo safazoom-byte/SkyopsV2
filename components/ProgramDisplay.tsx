@@ -10,6 +10,16 @@ import {
   ProgramVersion,
   ManualAssignment,  isStaffActiveOnDate, isStaffActiveInPeriod,
 } from "../types";
+
+const getStaffRoleRating = (st: Staff | undefined | null, role: string) => {
+  if (!st) return 100;
+  if (role === "SL" || role === "Shift Leader") return st.ratingSL !== undefined ? st.ratingSL : (st.rating !== undefined ? st.rating : 100);
+  if (role === "RMP" || role === "Ramp") return st.ratingRamp !== undefined ? st.ratingRamp : (st.rating !== undefined ? st.rating : 100);
+  if (role === "OPS" || role === "Operations") return st.ratingOps !== undefined ? st.ratingOps : (st.rating !== undefined ? st.rating : 100);
+  if (role === "LF" || role === "Lost and Found") return st.ratingLF !== undefined ? st.ratingLF : (st.rating !== undefined ? st.rating : 100);
+  if (role === "LC" || role === "Load Control") return st.ratingLC !== undefined ? st.ratingLC : (st.rating !== undefined ? st.rating : 100);
+  return st.rating !== undefined ? st.rating : 100;
+};
 import { ProgramCheck } from "./ProgramCheck";
 import {
   FileDown,
@@ -3350,9 +3360,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                               <th className="px-4 py-3 w-24 text-center">
                                 HC / Max
                               </th>
-                              <th className="px-4 py-3 w-24 text-center">
-                                C&G Power
-                              </th>
+                              <th className="px-4 py-3 text-center min-w-[120px]">Rates</th>
                               <th className="px-4 py-3">
                                 Personnel & Assigned Roles
                               </th>
@@ -3418,10 +3426,28 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   ? Math.round(
                                       assignedTraffic.reduce((sum, a) => {
                                         const st = getStaff(a.staffId);
-                                        return sum + (st?.rating !== undefined && st?.rating !== null ? st.rating : 100);
+                                        return sum + getStaffRoleRating(st, a.role);
                                       }, 0) / assignedTraffic.length
                                     )
                                   : 0;
+
+                                const getShiftMaxRating = (key: 'ratingRamp' | 'ratingOps' | 'ratingSL', roleKey: 'isRamp' | 'isOps' | 'isShiftLeader') => {
+                                  const eligibleStaff = assignedTraffic.filter(a => {
+                                    const st = getStaff(a.staffId);
+                                    return st && st[roleKey];
+                                  });
+                                  if (eligibleStaff.length === 0) return 0;
+                                  return eligibleStaff.reduce((max, a) => {
+                                    const st = getStaff(a.staffId);
+                                    if (!st) return max;
+                                    const rate = st[key] !== undefined && st[key] !== null ? st[key] : (st.rating !== undefined && st.rating !== null ? st.rating : 100);
+                                    return Math.max(max, rate as number);
+                                  }, 0);
+                                };
+
+                                const rampRate = getShiftMaxRating('ratingRamp', 'isRamp');
+                                const opsRate = getShiftMaxRating('ratingOps', 'isOps');
+                                const slRate = getShiftMaxRating('ratingSL', 'isShiftLeader');
 
                                 return (
                                   <tr
@@ -3454,14 +3480,52 @@ export const ProgramDisplay: React.FC<Props> = ({
                                     </td>
                                     <td className="px-4 py-3 text-center font-bold">
                                       {assignedTraffic.length > 0 ? (
-                                        <span className={`inline-block px-2 py-1 rounded-md text-[11px] ${
-                                          avgRating >= 85 ? "bg-emerald-100 text-emerald-800" :
-                                          avgRating >= 70 ? "bg-blue-100 text-blue-800" :
-                                          avgRating >= 50 ? "bg-amber-100 text-amber-800" :
-                                          "bg-rose-100 text-rose-800"
-                                        }`}>
-                                          {avgRating}%
-                                        </span>
+                                        <div className="flex flex-col gap-1 items-center justify-center">
+                                          <div className="flex items-center gap-1 text-[10px]">
+                                            <span className="text-slate-500 w-6 text-right">C&G:</span>
+                                            <span className={`inline-block px-1.5 py-0.5 rounded-sm ${
+                                              avgRating >= 85 ? "bg-emerald-100 text-emerald-800" :
+                                              avgRating >= 70 ? "bg-blue-100 text-blue-800" :
+                                              avgRating >= 50 ? "bg-amber-100 text-amber-800" :
+                                              "bg-rose-100 text-rose-800"
+                                            }`}>
+                                              {avgRating}%
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1 text-[10px]">
+                                            <span className="text-slate-500 w-6 text-right">RMP:</span>
+                                            <span className={`inline-block px-1.5 py-0.5 rounded-sm ${
+                                              rampRate >= 85 ? "bg-emerald-100 text-emerald-800" :
+                                              rampRate >= 70 ? "bg-blue-100 text-blue-800" :
+                                              rampRate >= 50 ? "bg-amber-100 text-amber-800" :
+                                              "bg-rose-100 text-rose-800"
+                                            }`}>
+                                              {rampRate}%
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1 text-[10px]">
+                                            <span className="text-slate-500 w-6 text-right">OPS:</span>
+                                            <span className={`inline-block px-1.5 py-0.5 rounded-sm ${
+                                              opsRate >= 85 ? "bg-emerald-100 text-emerald-800" :
+                                              opsRate >= 70 ? "bg-blue-100 text-blue-800" :
+                                              opsRate >= 50 ? "bg-amber-100 text-amber-800" :
+                                              "bg-rose-100 text-rose-800"
+                                            }`}>
+                                              {opsRate}%
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1 text-[10px]">
+                                            <span className="text-slate-500 w-6 text-right">SL:</span>
+                                            <span className={`inline-block px-1.5 py-0.5 rounded-sm ${
+                                              slRate >= 85 ? "bg-emerald-100 text-emerald-800" :
+                                              slRate >= 70 ? "bg-blue-100 text-blue-800" :
+                                              slRate >= 50 ? "bg-amber-100 text-amber-800" :
+                                              "bg-rose-100 text-rose-800"
+                                            }`}>
+                                              {slRate}%
+                                            </span>
+                                          </div>
+                                        </div>
                                       ) : (
                                         <span className="text-slate-300">-</span>
                                       )}
@@ -4200,7 +4264,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                           if (!st) return null;
                           return (
                             <div key={a.id} className="flex items-center justify-between bg-slate-50 p-2 rounded-xl">
-                              <span className="font-bold text-sm text-slate-700">{st.name} <span className="text-slate-400 text-xs font-mono ml-1">({st.initials})</span></span>
+                              <span className="font-bold text-sm text-slate-700">{st.name} <span className="text-slate-400 text-xs font-mono ml-1">({st.initials}) - {a.role} [{getStaffRoleRating(st, a.role)}%]</span></span>
                               <button
                                 onClick={() => removeStaff(st.id)}
                                 className="bg-rose-50 text-rose-500 p-2 rounded-lg hover:bg-rose-500 hover:text-white transition-colors"
@@ -4225,9 +4289,25 @@ export const ProgramDisplay: React.FC<Props> = ({
                       defaultValue=""
                     >
                       <option value="" disabled>Select available staff...</option>
-                      {offStaff.map(st => (
+                      {offStaff.map(st => {
+                        let assignedRole = "AGT";
+                        if (st.isShiftLeader || st.initials.toUpperCase() === "SK-ATZ") assignedRole = "SL";
+                        else if (st.isLoadControl) assignedRole = "LC";
+                        else if (st.isRamp) assignedRole = "RMP";
+                        else if (st.isLostFound) assignedRole = "LF";
+                        else if (st.isOps) assignedRole = "OPS";
+                        else if (st.isLabour) assignedRole = "LBR";
+                        else if (st.isSecurity) assignedRole = "SEC";
+                        else if (st.isDriver) assignedRole = "DRV";
+                        
+                        const roleRating = getStaffRoleRating(st, assignedRole);
+                        return { st, assignedRole, roleRating };
+                      }).sort((a, b) => {
+                        if (a.assignedRole !== b.assignedRole) return a.assignedRole.localeCompare(b.assignedRole);
+                        return b.roleRating - a.roleRating;
+                      }).map(({st, assignedRole, roleRating}) => (
                         <option key={st.id} value={st.id}>
-                          {st.name} ({st.initials})
+                          {st.name} ({st.initials}) - {assignedRole} [{roleRating}%]
                         </option>
                       ))}
                     </select>

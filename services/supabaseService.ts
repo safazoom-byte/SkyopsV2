@@ -233,7 +233,12 @@ export const db = {
             workToDate: s.work_to_date,
             rosterPeriods,
             isActive: s.is_active !== false,
-            rating: s.rating !== undefined && s.rating !== null ? s.rating : 100,
+            rating: s.skill_ratings?.rating !== undefined && s.skill_ratings.rating !== null ? s.skill_ratings.rating : 100,
+            ratingSL: s.skill_ratings?.ratingSL,
+            ratingOps: s.skill_ratings?.ratingOps,
+            ratingLF: s.skill_ratings?.ratingLF,
+            ratingRamp: s.skill_ratings?.ratingRamp,
+            ratingLC: s.skill_ratings?.ratingLC,
           };
         }),
         shifts: (shRes.data || []).map((s: any) => ({
@@ -349,7 +354,14 @@ export const db = {
         work_from_date: s.workFromDate || null,
         work_to_date: s.workToDate || null,
         is_active: s.isActive !== false,
-        rating: s.rating !== undefined ? s.rating : 100,
+        skill_ratings: {
+          rating: s.rating !== undefined ? s.rating : 100,
+          ratingSL: s.ratingSL,
+          ratingOps: s.ratingOps,
+          ratingLF: s.ratingLF,
+          ratingRamp: s.ratingRamp,
+          ratingLC: s.ratingLC,
+        },
       });
     } catch (e) {
       console.warn("Failed to upsert staff:", e);

@@ -91,6 +91,7 @@ import {
   Timer,
   CheckCircle2,
   PieChart,
+  ClipboardList,
   PlaneTakeoff,
 } from "lucide-react";
 import "./style.css";
@@ -118,6 +119,7 @@ import { ProgramScanner } from "./components/ProgramScanner";
 import { GithubSync } from "./components/GithubSync";
 import { CapacityForecast } from "./components/CapacityForecast";
 import { StationStatistics } from "./components/StationStatistics";
+import { ReportsDisplay } from "./components/ReportsDisplay";
 import { CommandCenter } from "./components/CommandCenter";
 import { AirlineManager } from "./components/AirlineManager";
 import { Auth } from "./components/Auth";
@@ -145,6 +147,7 @@ const App: React.FC = () => {
     | "staff"
     | "shifts"
     | "program"
+    | "reports"
     | "statistics"
     | "command"
       >("dashboard");
@@ -953,6 +956,7 @@ const App: React.FC = () => {
               "staff",
               "shifts",
               "program",
+              "reports",
               "statistics",
             ].map((tab) => (
               <button
@@ -1979,6 +1983,14 @@ const App: React.FC = () => {
         )}
 
         
+                {activeTab === "reports" && (
+          <ReportsDisplay
+            staff={staff}
+            leaveRequests={leaveRequests}
+            startDate={startDate}
+            endDate={endDate}
+          />
+        )}
         {activeTab === "statistics" && (
 
           <div className="max-w-6xl mx-auto space-y-6 md:space-y-12 animate-in fade-in duration-500">
@@ -2035,6 +2047,7 @@ const App: React.FC = () => {
           { id: "staff", icon: Users, label: "Staff" },
           { id: "shifts", icon: Clock, label: "Shifts" },
           { id: "program", icon: CalendarDays, label: "Roster" },
+          { id: "reports", icon: ClipboardList, label: "Reports" },
           { id: "statistics", icon: PieChart, label: "Stats" },
           ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
             ? [{ id: "command", icon: Shield, label: "Cmd" }]

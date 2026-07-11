@@ -13,9 +13,10 @@ import {
   X,
   PlaneTakeoff,
   Star,
+  Download,
 } from "lucide-react";
 import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
-import { db, auth } from "../services/supabaseService";
+import { db, auth, supabase } from "../services/supabaseService";
 import { AirlineManager } from "./AirlineManager";
 
 const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
@@ -86,6 +87,131 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   useEffect(() => {
     loadData();
   }, []);
+
+  
+  const exportRatingsExcel = async () => {
+    if (!staff || !staff.length) return;
+    const trafficStaff = staff.filter(s => 
+      !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver
+    );
+    if (!trafficStaff.length) return;
+    
+    const exceljsModule = await import('exceljs');
+    const ExcelJS = exceljsModule.default || exceljsModule;
+    const { default: saveAs } = await import('file-saver');
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SkyOps';
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet('Staff Ratings', {
+      views: [{ state: 'frozen', ySplit: 1 }]
+    });
+
+    worksheet.columns = [
+      { header: 'SN', key: 'sn', width: 6 },
+      { header: 'Initials', key: 'initials', width: 12 },
+      { header: 'Name', key: 'name', width: 30 },
+      { header: 'C&G Rate (%)', key: 'cg', width: 18 },
+      { header: 'SL Rate (%)', key: 'sl', width: 18 },
+      { header: 'OPS Rate (%)', key: 'ops', width: 18 },
+      { header: 'LF Rate (%)', key: 'lf', width: 18 },
+      { header: 'RMP Rate (%)', key: 'rmp', width: 18 }
+    ];
+
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0F172A' }
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.protection = { locked: true };
+    });
+
+    trafficStaff.forEach((s, idx) => {
+      const cg = s.rating !== undefined && s.rating !== null ? s.rating : 100;
+      const sl = s.isShiftLeader ? (s.ratingSL !== undefined && s.ratingSL !== null ? s.ratingSL : 100) : "N/A";
+      const ops = s.isOps ? (s.ratingOps !== undefined && s.ratingOps !== null ? s.ratingOps : 100) : "N/A";
+      const lf = s.isLostFound ? (s.ratingLF !== undefined && s.ratingLF !== null ? s.ratingLF : 100) : "N/A";
+      const rmp = s.isRamp ? (s.ratingRamp !== undefined && s.ratingRamp !== null ? s.ratingRamp : 100) : "N/A";
+      
+      const row = worksheet.addRow({
+        sn: idx + 1,
+        initials: s.initials,
+        name: s.name,
+        cg,
+        sl,
+        ops,
+        lf,
+        rmp
+      });
+      
+      row.eachCell((cell, colNumber) => {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.protection = { locked: false };
+        
+        cell.border = {
+          top: {style:'thin', color: {argb:'FFCBD5E1'}},
+          left: {style:'thin', color: {argb:'FFCBD5E1'}},
+          bottom: {style:'thin', color: {argb:'FFCBD5E1'}},
+          right: {style:'thin', color: {argb:'FFCBD5E1'}}
+        };
+
+        if (colNumber <= 3) {
+           cell.protection = { locked: true };
+           cell.font = { bold: true, color: { argb: 'FF334155' } };
+           if (colNumber === 3) cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        } else {
+           if (cell.value === 'N/A') {
+              cell.protection = { locked: true };
+              cell.font = { italic: true, color: { argb: 'FF94A3B8' } };
+              cell.fill = {
+                 type: 'pattern',
+                 pattern: 'solid',
+                 fgColor: { argb: 'FFF1F5F9' }
+              };
+           } else {
+              cell.protection = { locked: false };
+              cell.font = { bold: true, color: { argb: 'FF059669' } };
+              cell.fill = {
+                 type: 'pattern',
+                 pattern: 'solid',
+                 fgColor: { argb: 'FFECFDF5' }
+              };
+              cell.dataValidation = {
+                type: 'whole',
+                operator: 'between',
+                formulae: [0, 100],
+                showErrorMessage: true,
+                errorTitle: 'Invalid Rating',
+                error: 'Rating must be between 0 and 100'
+              };
+           }
+        }
+      });
+    });
+
+    await worksheet.protect('skyops', {
+      selectLockedCells: true,
+      selectUnlockedCells: true,
+      formatCells: false,
+      formatColumns: false,
+      formatRows: false,
+      insertRows: false,
+      insertColumns: false,
+      insertHyperlinks: false,
+      deleteRows: false,
+      deleteColumns: false,
+      sort: true,
+      autoFilter: true
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, 'Staff_Ratings.xlsx');
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -323,7 +449,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             onClick={() => setActiveTab("ratings")}
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "ratings" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
-            <Star size={14} className="inline mr-1 md:mr-2" /> C&G Rating System
+            <Star size={14} className="inline mr-1 md:mr-2" /> Rating System
           </button>
           {currentUser.role === "super_admin" && (
           <button
@@ -346,6 +472,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
               System Audit Trail
             </h4>
+            
             <div className="relative w-full sm:w-auto">
               <Search
                 size={16}
@@ -359,6 +486,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                 className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
               />
             </div>
+
           </div>
           <div className="max-h-[600px] overflow-y-auto p-6 space-y-8 bg-slate-50/30">
             {sortedUsers.length === 0 ? (
@@ -442,7 +570,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
               <button
                 onClick={async () => {
                   if (newAirportName && newAirportCode) {
-                    const client = (await import('../services/supabaseService')).supabase;
+                    const client = supabase;
                     if (client) {
                       const { data } = await client.from("airports").insert({ name: newAirportName, code: newAirportCode }).select();
                       if (data) {
@@ -617,8 +745,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                               Max Staff
                             </label>
-                            <input
-                              type="number"
+                            <input type="number" onWheel={(e) => e.currentTarget.blur()}
                               value={user.maxStaff}
                               onChange={(e) =>
                                 setUsers(users.map((u) => u.id === user.id ? { ...u, maxStaff: parseInt(e.target.value) || 0 } : u))
@@ -632,8 +759,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                             <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                               Max Shifts
                             </label>
-                            <input
-                              type="number"
+                            <input type="number" onWheel={(e) => e.currentTarget.blur()}
                               value={user.maxShifts}
                               onChange={(e) =>
                                 setUsers(users.map((u) => u.id === user.id ? { ...u, maxShifts: parseInt(e.target.value) || 0 } : u))
@@ -657,8 +783,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Daily
                         </label>
-                        <input
-                          type="number"
+                        <input type="number" onWheel={(e) => e.currentTarget.blur()}
                           value={user.aiDailyLimit}
                           onChange={(e) =>
                             setUsers(users.map((u) => u.id === user.id ? { ...u, aiDailyLimit: parseInt(e.target.value) || 0 } : u))
@@ -672,8 +797,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Weekly
                         </label>
-                        <input
-                          type="number"
+                        <input type="number" onWheel={(e) => e.currentTarget.blur()}
                           value={user.aiWeeklyLimit}
                           onChange={(e) =>
                             setUsers(users.map((u) => u.id === user.id ? { ...u, aiWeeklyLimit: parseInt(e.target.value) || 0 } : u))
@@ -687,8 +811,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Monthly
                         </label>
-                        <input
-                          type="number"
+                        <input type="number" onWheel={(e) => e.currentTarget.blur()}
                           value={user.aiMonthlyLimit}
                           onChange={(e) =>
                             setUsers(users.map((u) => u.id === user.id ? { ...u, aiMonthlyLimit: parseInt(e.target.value) || 0 } : u))
@@ -732,24 +855,33 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
           <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
             <div>
               <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider animate-in fade-in">
-                Traffic Staff C&G Rating System
+                Rating System
               </h4>
               <p className="text-xs text-slate-400 mt-1">
-                Rate traffic staff from 0% to 100%. Shift C&G Power is calculated as the average rating of assigned traffic staff.
+                Rate traffic staff from 0% to 100%. Shift Power is calculated as the average rating of assigned traffic staff.
               </p>
             </div>
-            <div className="relative w-full sm:w-auto">
-              <Search
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              />
-              <input
-                type="text"
-                placeholder="Search staff..."
-                value={ratingsSearch}
-                onChange={(e) => setRatingsSearch(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
-              />
+            <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative w-full sm:w-auto">
+                <Search
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  placeholder="Search staff..."
+                  value={ratingsSearch}
+                  onChange={(e) => setRatingsSearch(e.target.value)}
+                  className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
+                />
+              </div>
+              <button
+                onClick={exportRatingsExcel}
+                className="w-full sm:w-auto px-4 py-2 bg-slate-900 text-white rounded-xl font-bold uppercase text-[10px] md:text-xs hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2"
+                title="Download Ratings"
+              >
+                <Download size={14} /> Download Excel
+              </button>
             </div>
           </div>
           
@@ -760,8 +892,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   <th className="px-6 py-3 w-20">S/N</th>
                   <th className="px-6 py-3 w-32">Initials</th>
                   <th className="px-6 py-3">Name</th>
-                  <th className="px-6 py-3 w-48 text-center">Roles</th>
-                  <th className="px-6 py-3 w-64 text-center">C&G Rating (0-100%)</th>
+                                    <th className="px-6 py-3 w-64 text-center">C&G Rating</th>
+<th className="px-6 py-3 text-center">Role Ratings</th>
                 </tr>
               </thead>
               <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
@@ -773,14 +905,48 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                   </tr>
                 ) : (
                   filteredTrafficStaff.map((member, sIdx) => {
-                    const currentVal = member.rating !== undefined ? member.rating : 100;
-                    const roles = [
-                      member.isShiftLeader && "SL",
-                      member.isLoadControl && "LC",
-                      member.isRamp && "RMP",
-                      member.isOps && "OPS",
-                      member.isLostFound && "LF",
-                    ].filter(Boolean).join(" + ") || "Traffic";
+                    const currentVal = member.rating !== undefined && member.rating !== null ? member.rating : 100;
+
+                    const renderRoleStepper = (label: string, colorTheme: 'rose' | 'emerald' | 'indigo' | 'amber', valueKey: keyof typeof member) => {
+                      const val = member[valueKey] !== undefined && member[valueKey] !== null ? member[valueKey] as number : 100;
+                      const colors = {
+                        rose: { text: "text-rose-600", val: "text-rose-700", bg: "bg-rose-500", track: "bg-slate-100", btn: "bg-rose-50 hover:bg-rose-100 text-rose-600", focus: "focus:ring-rose-500" },
+                        emerald: { text: "text-emerald-600", val: "text-emerald-700", bg: "bg-emerald-500", track: "bg-slate-100", btn: "bg-emerald-50 hover:bg-emerald-100 text-emerald-600", focus: "focus:ring-emerald-500" },
+                        indigo: { text: "text-indigo-600", val: "text-indigo-700", bg: "bg-indigo-500", track: "bg-slate-100", btn: "bg-indigo-50 hover:bg-indigo-100 text-indigo-600", focus: "focus:ring-indigo-500" },
+                        amber: { text: "text-amber-600", val: "text-amber-700", bg: "bg-amber-500", track: "bg-slate-100", btn: "bg-amber-50 hover:bg-amber-100 text-amber-600", focus: "focus:ring-amber-500" },
+                      };
+                      const c = colors[colorTheme];
+                      return (
+                        <div key={valueKey} className="flex items-center gap-2 justify-between">
+                          <span className={`text-[10px] font-bold ${c.text} w-8`}>{label}</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.max(0, val - 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>-</button>
+                            <div className={`flex-1 h-1.5 ${c.track} rounded-full overflow-hidden relative min-w-[30px]`}>
+                              <div className={`h-full ${c.bg} transition-all absolute left-0 top-0`} style={{ width: `${val}%` }}></div>
+                            </div>
+                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.min(100, val + 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>+</button>
+                          </div>
+                          <div className="flex items-center gap-0.5">
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={val}
+                                onWheel={(e) => e.currentTarget.blur()}
+                                onChange={(e) => {
+                                  let v = parseInt(e.target.value, 10);
+                                  if (isNaN(v)) v = 0;
+                                  if (v < 0) v = 0;
+                                  if (v > 100) v = 100;
+                                  if (onUpdateStaff) onUpdateStaff({...member, [valueKey]: v});
+                                }}
+                                className={`w-10 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 ${c.focus} text-[10px] text-slate-700`}
+                            />
+                            <span className="text-[10px] font-bold text-slate-400">%</span>
+                          </div>
+                        </div>
+                      );
+                    };
 
                     return (
                       <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
@@ -791,28 +957,27 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                           </span>
                         </td>
                         <td className="px-6 py-4 font-bold text-slate-900">{member.name}</td>
-                        <td className="px-6 py-4 text-center text-slate-500 font-semibold">{roles}</td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-4 justify-center">
-                            <input
-                              type="range"
-                              min="0"
-                              max="100"
-                              value={currentVal}
-                              onChange={(e) => {
-                                const val = parseInt(e.target.value, 10);
-                                if (onUpdateStaff) {
-                                  onUpdateStaff({
-                                    ...member,
-                                    rating: val
-                                  });
-                                }
-                              }}
-                              className="w-36 h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-none"
-                            />
-                            <div className="flex items-center gap-1 w-16">
-                              <input
-                                type="number"
+                            <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+                              <button
+                                onClick={() => {
+                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.max(0, currentVal - 5) });
+                                }}
+                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
+                              >-</button>
+                              <div className="w-full h-1.5 bg-slate-100 rounded-lg overflow-hidden relative min-w-[40px]">
+                                <div className="h-full bg-emerald-500 absolute left-0 top-0 transition-all" style={{ width: `${currentVal}%` }}></div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.min(100, currentVal + 5) });
+                                }}
+                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
+                              >+</button>
+                            </div>
+                            <div className="flex items-center gap-1 w-16 shrink-0">
+                              <input type="number" onWheel={(e) => e.currentTarget.blur()}
                                 min="0"
                                 max="100"
                                 value={currentVal}
@@ -832,6 +997,14 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                               />
                               <span className="text-xs font-bold text-slate-400">%</span>
                             </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-3 min-w-[180px]">
+                            {member.isShiftLeader && renderRoleStepper("SL", "rose", "ratingSL")}
+                            {member.isOps && renderRoleStepper("OPS", "emerald", "ratingOps")}
+                            {member.isLostFound && renderRoleStepper("LF", "indigo", "ratingLF")}
+                            {member.isRamp && renderRoleStepper("RMP", "amber", "ratingRamp")}
                           </div>
                         </td>
                       </tr>

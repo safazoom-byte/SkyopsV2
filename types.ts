@@ -62,6 +62,11 @@ export interface Staff {
   workToDate?: string;
   rosterPeriods?: { start: string; end: string }[];
   rating?: number;
+  ratingSL?: number;
+  ratingOps?: number;
+  ratingLF?: number;
+  ratingRamp?: number;
+  ratingLC?: number;
 }
 
 export interface IncomingDuty {
