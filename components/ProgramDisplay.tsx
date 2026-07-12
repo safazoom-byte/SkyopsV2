@@ -1492,14 +1492,25 @@ export const ProgramDisplay: React.FC<Props> = ({
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
         shiftsToday.forEach((shift, idx) => {
-          const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id));
+          const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id)).filter((a, index, self) => self.findIndex(t => t.staffId === a.staffId) === index);
           
-          let staffTokens: {text: string, type: string, hasNote?: boolean}[] = [];
+          let staffTokens: {text: string, type: string, hasNote?: boolean, isExtension?: boolean}[] = [];
           assignments.forEach(a => {
              const s = getStaff(a.staffId);
              if (s) {
                  const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : s.isAccountant ? 'acc' : 'reg';
-                 staffTokens.push({ text: a.note ? `${s.initials} (${a.note})` : s.initials, type, hasNote: !!a.note });
+                 let label = s.initials;
+                 if (a.isExtension && a.initialShiftId) {
+                   const initShift = shifts.find(sh => sh.id === a.initialShiftId);
+                   if (initShift) {
+                     const start = initShift.pickupTime;
+                     const end = a.releaseTime || shift.endTime;
+                     label = `${s.initials} (${start}-${end})`;
+                   }
+                 } else if (a.note) {
+                   label = `${s.initials} (${a.note})`;
+                 }
+                 staffTokens.push({ text: label, type, hasNote: !!a.note, isExtension: a.isExtension });
              }
           });
           
@@ -1646,6 +1657,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   if (t.type === 'acc') color = 'FF1D4ED8';
                   
                   if (t.hasNote) color = 'FFEA580C'; // Orange for notes
+                  if (t.isExtension) color = 'FF10B981'; // Emerald Green for extensions
                   
                   if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
                   richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
@@ -1891,7 +1903,7 @@ export const ProgramDisplay: React.FC<Props> = ({
            ]);
         } else {
              shiftsToday.forEach((shift, idx) => {
-             const assignments = sortAssignmentsForPDF(prog.assignments.filter(a => a.shiftId === shift.id));
+             const assignments = sortAssignmentsForPDF(prog.assignments.filter(a => a.shiftId === shift.id)).filter((a, index, self) => self.findIndex(t => t.staffId === a.staffId) === index);
              const staffTokens = assignments.map(a => {
                  const s = getStaff(a.staffId);
                  if (!s) return null;
@@ -2202,6 +2214,50 @@ export const ProgramDisplay: React.FC<Props> = ({
     onUpdatePrograms(newPrograms, [dateString]);
   };
 
+  
+  const executeExtend = (
+    staffId: string,
+    initialShiftId: string,
+    date: string,
+    role: string,
+    targetShiftId: string,
+    releaseTime: string
+  ) => {
+    if (!targetShiftId) return;
+    const newPrograms = [...programs];
+    const progIndex = newPrograms.findIndex((p) => p.dateString === date);
+    if (progIndex === -1) return;
+    
+    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
+    
+    const isAlreadyAssigned = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId);
+    if (isAlreadyAssigned) {
+      alert("Staff already in this shift.");
+      return;
+    }
+    
+    const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+    prog.assignments.push({
+      id: crypto.randomUUID(),
+      staffId,
+      shiftId: targetShiftId,
+      flightId: "",
+      role,
+      manualSortIndex: maxSort + 1,
+      isExtension: true,
+      initialShiftId,
+      releaseTime: releaseTime || undefined
+    });
+    
+    newPrograms[progIndex] = prog;
+    if (onUpdatePrograms) {
+      onUpdatePrograms(newPrograms, [date]);
+    }
+    setStaffActionModal(null);
+    setExtendReleaseTime("");
+    setExtendTargetShiftId("");
+  };
+
   const executeMove = (
     staffId: string,
     currentShiftId: string,
@@ -2345,6 +2401,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
   };
 
+  const [extendReleaseTime, setExtendReleaseTime] = React.useState("");
+  const [extendTargetShiftId, setExtendTargetShiftId] = React.useState("");
   const [staffActionModal, setStaffActionModal] = React.useState<{
     staffId: string;
     currentShiftId: string;
@@ -3371,7 +3429,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                               (shift, idx, shiftsToday) => {
                                 const assignments = sortAssignments(prog.assignments.filter(
                                   (a) => a.shiftId === shift.id,
-                                ));
+                                )).filter((a, index, self) => self.findIndex(t => t.staffId === a.staffId) === index);
                                 const flightStrs = sortFlightsByTime(shift.flightIds || [], shift.pickupTime);
                                 const nonLabourCount = assignments.filter((a) => {
                                   const st = getStaff(a.staffId);
@@ -3553,11 +3611,22 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             const daysWorked = getStaffWorkload(
                                               st.id,
                                             );
-                                            const colorClass = getStaffColor(
+                                            const colorClassBase = getStaffColor(
                                               st,
                                               daysWorked,
                                               rest,
                                             );
+                                            const colorClass = a.isExtension
+                                              ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
+                                              : colorClassBase;
+                                            
+                                            let extText = st.initials;
+                                            if (a.isExtension && a.initialShiftId) {
+                                              const initShift = shifts.find(s => s.id === a.initialShiftId);
+                                              if (initShift) {
+                                                extText = `${st.initials} (${initShift.pickupTime}-${a.releaseTime || shift.endTime})`;
+                                              }
+                                            }
 
                                             let target = 5;
                                             if (st.type === "Roster") {
@@ -3698,7 +3767,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                 }}
                                                 className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === st.id && staffActionModal?.currentShiftId === shift.id && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${manualAssignments && manualAssignments.some((ma) => ma.staffId === st.id && ma.shiftId === shift.id) ? "opacity-80 cursor-not-allowed border-indigo-200" : "cursor-move hover:scale-105"}`}
                                               >
-                                                <span>{st.initials}{a.note ? ` (${a.note})` : ""}</span>
+                                                <span>{extText}{a.note ? ` (${a.note})` : ""}</span>
                                                 {manualAssignments &&
                                                 manualAssignments.some(
                                                   (ma) =>
@@ -4407,10 +4476,53 @@ export const ProgramDisplay: React.FC<Props> = ({
                     <option value="ABSENCE_ROSTER LEAVE" disabled={staffActionModal.currentShiftId === "ABSENCE_ROSTER LEAVE" || st.type === "Local"}>Roster Leave</option>
                     <option value="ABSENCE_STANDBY (RESERVE)" disabled={staffActionModal.currentShiftId === "ABSENCE_STANDBY (RESERVE)"}>Standby (Reserve)</option>
                   </optgroup>
+                  
                   <optgroup label="Action">
                     <option value="OFFDUTY" disabled={staffActionModal.currentShiftId === "OFFDUTY"}>Remove from Shift / Send Off-Duty</option>
                   </optgroup>
                 </select>
+
+                {!staffActionModal.currentShiftId.startsWith("ABSENCE_") && (
+                  <div className="mt-4 pt-4 border-t border-slate-100">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Extend To Shift</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={extendTargetShiftId}
+                        onChange={(e) => setExtendTargetShiftId(e.target.value)}
+                        className="w-2/3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-700 focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-400/20"
+                      >
+                        <option value="" disabled>Select shift...</option>
+                        {(() => {
+                          const dayShifts = shifts.filter(s => s.pickupDate === staffActionModal.date).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                          const currIdx = dayShifts.findIndex(s => s.id === staffActionModal.currentShiftId);
+                          const validShifts = currIdx !== -1 && currIdx < dayShifts.length - 1 ? [dayShifts[currIdx + 1]] : [];
+                          return validShifts.map(s => (
+                            <option key={s.id} value={s.id}>Shift at {s.pickupTime}</option>
+                          ));
+                        })()}
+                      </select>
+                      <input 
+                        type="time"
+                        value={extendReleaseTime}
+                        onChange={(e) => setExtendReleaseTime(e.target.value)}
+                        className="w-1/3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-700 focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-400/20"
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (extendTargetShiftId) {
+                          const currentAssignment = programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                          const trueInitialShiftId = currentAssignment?.isExtension && currentAssignment.initialShiftId ? currentAssignment.initialShiftId : staffActionModal.currentShiftId;
+                          executeExtend(staffActionModal.staffId, trueInitialShiftId, staffActionModal.date, staffActionModal.role, extendTargetShiftId, extendReleaseTime);
+                        }
+                      }}
+                      disabled={!extendTargetShiftId}
+                      className="mt-3 w-full p-3 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold uppercase tracking-widest text-xs transition-colors"
+                    >
+                      Confirm Extension
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

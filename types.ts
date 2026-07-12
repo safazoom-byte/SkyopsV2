@@ -108,6 +108,9 @@ export interface Assignment {
   shiftId?: string;
   manualSortIndex?: number;
   note?: string;
+  isExtension?: boolean;
+  releaseTime?: string;
+  initialShiftId?: string;
 }
 
 export interface OffDutyRecord {
