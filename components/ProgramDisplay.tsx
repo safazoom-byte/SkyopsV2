@@ -1500,17 +1500,15 @@ export const ProgramDisplay: React.FC<Props> = ({
              if (s) {
                  const type = s.isDriver ? 'driver' : s.isLabour ? 'labour' : s.isSecurity ? 'sec' : s.isAccountant ? 'acc' : 'reg';
                  let label = s.initials;
-                 if (a.isExtension && a.initialShiftId) {
-                   const initShift = shifts.find(sh => sh.id === a.initialShiftId);
-                   if (initShift) {
-                     const start = initShift.pickupTime;
-                     const end = a.releaseTime || shift.endTime;
-                     label = `${s.initials} (${start}-${end})`;
-                   }
-                 } else if (a.note) {
+                 const isOriginalShiftOfExtension = prog.assignments.some(
+                   otherA => otherA.staffId === a.staffId && otherA.isExtension && otherA.initialShiftId === shift.id
+                 );
+                 const isAnyExtended = a.isExtension || isOriginalShiftOfExtension;
+
+                 if (a.note) {
                    label = `${s.initials} (${a.note})`;
                  }
-                 staffTokens.push({ text: label, type, hasNote: !!a.note, isExtension: a.isExtension });
+                 staffTokens.push({ text: label, type, hasNote: !!a.note, isExtension: !!isAnyExtended });
              }
           });
           
@@ -1657,10 +1655,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                   if (t.type === 'acc') color = 'FF1D4ED8';
                   
                   if (t.hasNote) color = 'FFEA580C'; // Orange for notes
-                  if (t.isExtension) color = 'FF10B981'; // Emerald Green for extensions
                   
                   if (i > 0) richText.push({ text: " - ", font: { color: { argb: 'FF000000' }, bold: true } });
-                  richText.push({ text: t.text, font: { color: { argb: color }, bold: true } });
+                  richText.push({ text: t.text, font: { color: { argb: color }, bold: true, underline: t.isExtension ? true : false } });
               });
           };
 
@@ -1911,7 +1908,13 @@ export const ProgramDisplay: React.FC<Props> = ({
                  if (s.isSecurity) type = "sec";
                  else if (s.isLabour) type = "labour";
                  else if (s.isDriver) type = "driver";
-                 return { text: s.initials, type };
+                 
+                 let label = s.initials;
+                 if (a.note) {
+                   label = `${s.initials} (${a.note})`;
+                 }
+                 
+                 return { text: label, type };
              }).filter(Boolean) as {text: string, type: string}[];
              
              const normalTokens = staffTokens.filter(t => t.type === 'traffic');
@@ -2489,7 +2492,12 @@ export const ProgramDisplay: React.FC<Props> = ({
       return "bg-gradient-to-br from-red-500 to-rose-700 text-white shadow-red-500/20";
     if (diff === 1)
       return "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-orange-500/20";
-    if (diff === 0) return "bg-white border-slate-200 text-slate-900 shadow-sm";
+    if (diff === 0) {
+      if (s.isLabour) return "bg-rose-50 border-rose-200 text-rose-900 shadow-sm";
+      if (s.isSecurity) return "bg-purple-50 border-purple-200 text-purple-900 shadow-sm";
+      if (s.isDriver) return "bg-emerald-50 border-emerald-200 text-emerald-900 shadow-sm";
+      return "bg-white border-slate-200 text-slate-900 shadow-sm";
+    }
     if (diff === -1)
       return "bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-blue-500/20";
     return "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-indigo-500/20";
@@ -3624,7 +3632,10 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             if (a.isExtension && a.initialShiftId) {
                                               const initShift = shifts.find(s => s.id === a.initialShiftId);
                                               if (initShift) {
-                                                extText = `${st.initials} (${initShift.pickupTime}-${a.releaseTime || shift.endTime})`;
+                                                let start = initShift.pickupTime;
+                                                let end = a.releaseTime || shift.endTime;
+                                                if (end.localeCompare(start) < 0) end += "+1";
+                                                extText = `${st.initials} (${start}-${end})`;
                                               }
                                             }
 
@@ -3780,7 +3791,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   />
                                                 ) : null}
                                                 {rest !== null &&
-                                                  rest < minRestHours && (
+                                                  rest < minRestHours && !a.isExtension && (
                                                     <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">
                                                       {rest}H
                                                     </span>

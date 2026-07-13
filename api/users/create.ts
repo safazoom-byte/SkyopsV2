@@ -37,7 +37,7 @@ export default async function handler(req: any, res: any) {
     if (createRes.error) {
       if (createRes.error.message.includes("already been registered") || createRes.error.message.includes("already exists")) {
         const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
-        const existingUser = users?.find(u => u.email === email);
+        const existingUser = users?.find((u: any) => u.email === email);
         if (existingUser) {
           userId = existingUser.id;
           userObj = existingUser;
