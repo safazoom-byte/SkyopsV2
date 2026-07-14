@@ -98,6 +98,7 @@ export interface ShiftConfig {
   roleCounts?: Partial<Record<Skill, number>>;
   flightIds?: string[];
   description?: string;
+  isHidden?: boolean;
 }
 
 export interface Assignment {

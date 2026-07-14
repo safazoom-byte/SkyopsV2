@@ -4,7 +4,7 @@ import { AVAILABLE_SKILLS, DAYS_OF_WEEK_FULL } from "../constants";
 import { FlightModalDialog } from "./FlightModalDialog";
 import { ErrorBoundary } from "./ErrorBoundary";
 import {
-  ChevronDown,
+  Eye, EyeOff, ChevronDown,
   Clock,
   Trash2,
   Edit2,
@@ -74,6 +74,7 @@ export const ShiftManager: React.FC<Props> = ({
   onDeleteFlight,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<ShiftConfig>>({
     pickupDate: startDate || new Date().toISOString().split("T")[0],
@@ -129,16 +130,43 @@ export const ShiftManager: React.FC<Props> = ({
 const isFlightOutOfScope = (flight: Flight | undefined, shift: ShiftConfig) => {
   if (!flight) return false;
   const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}:00`);
-  const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00`);
-  const flightTimeStr = flight.sta || flight.std;
-  if (!flightTimeStr) return false;
-  const fTime = new Date(`${flight.date}T${flightTimeStr}:00`);
-  return fTime < shiftStart || fTime > shiftEnd;
+  let shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00`);
+  if (shiftEnd < shiftStart) shiftEnd.setDate(shiftEnd.getDate() + 1);
+  
+  const isTimeOutOfScope = (timeStr: string | undefined) => {
+    if (!timeStr) return true;
+    let fTime = new Date(`${flight.date}T${timeStr}:00`);
+    
+    if (fTime >= shiftStart && fTime <= shiftEnd) return false;
+    
+    // Check if adding 1 day puts it in scope (e.g. 00:30 next day but recorded with old date)
+    const nextDay = new Date(fTime);
+    nextDay.setDate(nextDay.getDate() + 1);
+    if (nextDay >= shiftStart && nextDay <= shiftEnd) return false;
+    
+    // Check if subtracting 1 day puts it in scope
+    const prevDay = new Date(fTime);
+    prevDay.setDate(prevDay.getDate() - 1);
+    if (prevDay >= shiftStart && prevDay <= shiftEnd) return false;
+    
+    return true;
+  };
+
+  if (flight.type === "Turnaround") {
+    const arrOut = isTimeOutOfScope(flight.sta);
+    const depOut = isTimeOutOfScope(flight.std);
+    // If either arrival or departure is within scope, it's valid
+    return arrOut && depOut;
+  }
+  
+  const flightTimeStr = flight.type === "Arrival" ? flight.sta : flight.std;
+  return isTimeOutOfScope(flightTimeStr || flight.sta || flight.std);
 };
 
 const calculateShiftDuration = (shift: ShiftConfig) => {
   const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}:00Z`);
-  const shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00Z`);
+  let shiftEnd = new Date(`${shift.endDate || shift.pickupDate}T${shift.endTime}:00Z`);
+  if (shiftEnd < shiftStart) shiftEnd.setDate(shiftEnd.getDate() + 1);
   const diffMs = shiftEnd.getTime() - shiftStart.getTime();
   if (diffMs < 0) return "0h";
   const hrs = Math.floor(diffMs / 3600000);
@@ -1183,7 +1211,7 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                         </div>
 
                         <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
+                          <table className="w-full min-w-[1000px] text-left border-collapse">
                             <thead>
                               <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
                                 <th className="px-4 py-3 w-12 text-center">
@@ -1209,7 +1237,7 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                               {dateShifts.map((s, idx) => (
                                 <tr
                                   key={s.id}
-                                  className="hover:bg-slate-50 transition-colors"
+                                  className={`hover:bg-slate-50 transition-colors ${s.isHidden ? 'opacity-50 bg-slate-100/50 grayscale-[50%]' : ''}`}
                                 >
                                   <td className="px-4 py-3 text-center font-bold text-slate-400">
                                     {idx + 1}
@@ -1449,16 +1477,28 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                       </button>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-2 text-center">
+                                  <td className="px-4 py-2">
+                                    <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() => {
+                                          onUpdate({ ...s, isHidden: !s.isHidden });
+                                      }}
+                                      className={`${s.isHidden ? 'text-amber-500' : 'text-slate-400'} hover:text-amber-600 transition-colors p-1`}
+                                      title={s.isHidden ? "Unhide shift" : "Hide shift"}
+                                    >
+                                      {s.isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+                                    </button>
                                     <button
                                       onClick={() => {
                                         if (confirm("Purge slot?"))
                                           onDelete(s.id);
                                       }}
                                       className="text-slate-400 hover:text-rose-500 transition-colors p-1"
+                                      title="Delete shift"
                                     >
                                       <Trash2 size={14} />
                                     </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))}

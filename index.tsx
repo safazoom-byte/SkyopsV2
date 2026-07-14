@@ -114,7 +114,6 @@ import { FlightManager } from "./components/FlightManager";
 import { StaffManager } from "./components/StaffManager";
 import { ShiftManager } from "./components/ShiftManager";
 import { ProgramDisplay } from "./components/ProgramDisplay";
-import { ProgramChat } from "./components/ProgramChat";
 import { ProgramScanner } from "./components/ProgramScanner";
 import { GithubSync } from "./components/GithubSync";
 import { CapacityForecast } from "./components/CapacityForecast";
@@ -239,6 +238,7 @@ const App: React.FC = () => {
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>("Day off");
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
 
+  const nonHiddenShifts = shifts.filter(s => !s.isHidden);
   // --- PREFERENCE PERSISTENCE EFFECTS ---
   useEffect(() => {
     const start = new Date(startDate);
@@ -455,7 +455,7 @@ const App: React.FC = () => {
       }
     }
 
-    const activeShifts = shifts.filter(
+    const activeShifts = nonHiddenShifts.filter(
       (s) => s.pickupDate >= startDate && s.pickupDate <= endDate,
     );
     const eligibleStaff = staff.filter((s) => {
@@ -640,7 +640,7 @@ const App: React.FC = () => {
   ) => {
     const val = e.target.value;
     if (val.includes(" ") || val.includes(",") || val.includes("\n")) {
-      const tokens = val.split(/[\s,\n]+/);
+      const tokens = val.split(/[\\s,\n]+/);
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
 
@@ -670,7 +670,7 @@ const App: React.FC = () => {
   ) => {
     const val = e.target.value;
     if (val.includes(" ") || val.includes(",") || val.includes("\n")) {
-      const tokens = val.split(/[\s,\n]+/);
+      const tokens = val.split(/[\\s,\n]+/);
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
 
@@ -708,7 +708,7 @@ const App: React.FC = () => {
     // Process input text on button click
     let finalIds = [...incomingSelectedStaffIds];
     if (incomingSearchTerm.trim()) {
-      const tokens = incomingSearchTerm.split(/[\s,\n]+/);
+      const tokens = incomingSearchTerm.split(/[\\s,\n]+/);
       const remaining: string[] = [];
       tokens.forEach((token) => {
         if (!token) return;
@@ -822,7 +822,7 @@ const App: React.FC = () => {
     // Process input text on button click
     let finalIds = [...quickLeaveStaffIds];
     if (quickLeaveSearchTerm.trim()) {
-      const tokens = quickLeaveSearchTerm.split(/[\s,\n]+/);
+      const tokens = quickLeaveSearchTerm.split(/[\\s,\n]+/);
       const remaining: string[] = [];
       tokens.forEach((token) => {
         if (!token) return;
@@ -926,7 +926,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <header className="sticky top-0 z-[100] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between">
+      <header className="sticky top-0 z-[500] bg-white border-b border-slate-200 py-4 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <SkyOpsLogo size={42} />
           <div>
@@ -1013,12 +1013,12 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-32">
+      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-[180px] xl:pb-12">
         {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
           <CommandCenter
             currentUser={userProfile}
             flights={flights}
-            shifts={shifts}
+            shifts={nonHiddenShifts}
             startDate={startDate}
             endDate={endDate}
             staff={staff}
@@ -1030,7 +1030,7 @@ const App: React.FC = () => {
         )}
         {activeTab === "dashboard" && (() => {
           const activeFlights = flights.filter(f => f.date && f.date >= startDate && f.date <= endDate);
-          const activeShifts = shifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
+          const activeShifts = nonHiddenShifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
           const eligibleStaff = staff.filter((s) => {
             if (s.type === "Local") return true;
             if (s.rosterPeriods && s.rosterPeriods.length > 0) {
@@ -1134,16 +1134,17 @@ const App: React.FC = () => {
               ))}
             </div>
 
-            <CapacityForecast
+
+
+                        <CapacityForecast
               staff={staff}
-              shifts={shifts}
+              shifts={nonHiddenShifts}
               leaveRequests={leaveRequests}
               startDate={startDate}
               duration={programDuration}
             />
-
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-              <div className="lg:col-span-2 space-y-6 md:space-y-8">
+              <div className="lg:col-span-2 space-y-6 md:space-y-8 order-2 lg:order-1">
                 <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
                   <div className="flex items-center gap-4 mb-8">
                     <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center text-amber-500">
@@ -1555,7 +1556,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-10">
+              <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-10 sticky top-[100px] z-40 order-1 lg:order-2 self-start">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-blue-500 shadow-xl">
                     <Terminal size={24} />
@@ -1623,6 +1624,7 @@ const App: React.FC = () => {
                 </button>
               </div>
             </div>
+
           </div>
           );
         })()}
@@ -1930,7 +1932,7 @@ const App: React.FC = () => {
             programs={programs}
             flights={flights}
             staff={staff}
-            shifts={shifts}
+            shifts={nonHiddenShifts}
             leaveRequests={leaveRequests}
             incomingDuties={incomingDuties}
             manualAssignments={manualAssignments}
@@ -2030,7 +2032,7 @@ const App: React.FC = () => {
             </div>
             <StationStatistics
               staff={staff}
-              shifts={shifts}
+              shifts={nonHiddenShifts}
               leaveRequests={leaveRequests}
               startDate={startDate}
               endDate={endDate}
@@ -2040,7 +2042,8 @@ const App: React.FC = () => {
       </main>
 
       {/* Mobile Footer Navigation */}
-      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] overflow-x-auto gap-2">
+        
+      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 pb-safe z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] overflow-x-auto gap-2">
         {[
           { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
           { id: "flights", icon: Plane, label: "Flights" },
@@ -2075,17 +2078,14 @@ const App: React.FC = () => {
         ))}
       </nav>
 
-      <ProgramChat
-        data={{ flights, staff, shifts, programs }}
-        onUpdate={setPrograms}
-      />
+      
 
       <PreRosterModal
         isOpen={isPreRosterModalOpen}
         onClose={() => setIsPreRosterModalOpen(false)}
         onConfirm={confirmGenerateProgram}
         staff={staff}
-        shifts={shifts}
+        shifts={nonHiddenShifts}
         startDate={startDate}
         endDate={endDate}
       />
