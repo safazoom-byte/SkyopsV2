@@ -670,7 +670,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         } else {
           for (let i = index - 1; i >= 0; i--) {
             const prevProg = activePrograms[i];
-            const worked = prevProg.assignments.some((a) => a.staffId === s.id);
+            const worked = prevProg.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
             const prevLeave = hasLeaveOnDate(s.id, prevProg.dateString!);
             if (!worked && !prevLeave) count++;
             else break;
@@ -719,7 +719,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       contentStartY += 10;
 
       const shiftsToday = shifts
-        .filter((s) => s.pickupDate === prog.dateString)
+        .filter((s) => s.pickupDate === prog.dateString && !s.isHidden)
         .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       const tableData = shiftsToday.map((shift, idx) => {
         const assignments = sortAssignmentsForPDF(prog.assignments.filter(
@@ -864,13 +864,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     const localAuditData = localStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
-          acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+          acc + (p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }) ? 1 : 0),
         0,
       );
       let excusedLeaves = 0;
       activePrograms.forEach((p) => {
         const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
-        if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+        if (hasLeave && !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }))
           excusedLeaves++;
       });
       const daysOff = activePrograms.length - shiftsWorked - excusedLeaves;
@@ -920,7 +920,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const rosterAuditData = rosterStaff.map((s, idx) => {
       const shiftsWorked = activePrograms.reduce(
         (acc, p) =>
-          acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+          acc + (p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }) ? 1 : 0),
         0,
       );
       const progStart = new Date(startDate);
@@ -943,7 +943,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const d = new Date(p.dateString!);
         if (d >= overlapStart && d <= overlapEnd) {
           const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
-          if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+          if (hasLeave && !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }))
             excusedLeaves++;
         }
       });
@@ -1036,10 +1036,10 @@ export const ProgramDisplay: React.FC<Props> = ({
       let excusedLeaves = 0;
       activePrograms.forEach((p) => {
         const leave = hasLeaveOnDate(s.id, p.dateString!);
-        if (leave && leave.type !== "Day off" && !p.assignments.some((a) => a.staffId === s.id)) {
+        if (leave && leave.type !== "Day off" && !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; })) {
           excusedLeaves++;
         }
-        const assign = p.assignments.find((a) => a.staffId === s.id);
+        const assign = p.assignments.find((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
         if (assign) {
           workedCount++;
           const shift = getShift(assign.shiftId || "");
@@ -1057,7 +1057,7 @@ export const ProgramDisplay: React.FC<Props> = ({
               row.push(`${shift.pickupTime} ${restLabel}`);
             }
           } else {
-            row.push("ERR");
+            row.push("-");
           }
         } else if (leave) {
           if (leave.type === "Day off") row.push("-");
@@ -1169,7 +1169,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       const d = new Date(p.dateString || startDate);
       const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
       const shiftsToday = shifts
-        .filter((s) => s.pickupDate === p.dateString)
+        .filter((s) => s.pickupDate === p.dateString && !s.isHidden)
         .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
       shiftsToday.forEach((s) => {
         const assignments = p.assignments.filter((a) => a.shiftId === s.id);
@@ -1488,7 +1488,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         }
 
         const shiftsToday = shifts
-          .filter((s) => s.pickupDate === prog.dateString)
+          .filter((s) => s.pickupDate === prog.dateString && !s.isHidden)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
         shiftsToday.forEach((shift, idx) => {
@@ -1824,7 +1824,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
         const shiftsToday = shifts
-          .filter((s) => s.pickupDate === prog.dateString)
+          .filter((s) => s.pickupDate === prog.dateString && !s.isHidden)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
         // Group absence data
@@ -2584,19 +2584,15 @@ export const ProgramDisplay: React.FC<Props> = ({
                     const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
                     if (
                       hasLeave &&
-                      !p.assignments.some((a) => a.staffId === s.id)
+                      !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; })
                     )
                       excusedLeaves++;
-                    const assign = p.assignments.find(
-                      (a) => a.staffId === s.id,
-                    );
+                    const assign = p.assignments.find((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
 
                     const refProg = referencePrograms.find(
                       (rp) => rp.dateString === p.dateString,
                     );
-                    const refAssign = refProg?.assignments.find(
-                      (a) => a.staffId === s.id,
-                    );
+                    const refAssign = refProg?.assignments.find((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
 
                     const isCellModified =
                       assign?.shiftId !== refAssign?.shiftId ||
@@ -2644,7 +2640,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                         );
                       } else {
                         content = (
-                          <span className="text-rose-500 font-bold">ERR</span>
+                          <span className="text-slate-300">-</span>
                         );
                       }
 
@@ -2733,7 +2729,7 @@ export const ProgramDisplay: React.FC<Props> = ({
               const d = new Date(p.dateString || startDate);
               const dateLabel = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
               const shiftsToday = shifts
-                .filter((s) => s.pickupDate === p.dateString)
+                .filter((s) => s.pickupDate === p.dateString && !s.isHidden)
                 .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
               return shiftsToday.map((s, sIdx) => {
                 const assignments = p.assignments.filter(
@@ -2887,14 +2883,14 @@ export const ProgramDisplay: React.FC<Props> = ({
             {localStaff.map((s, idx) => {
               const shiftsWorked = activePrograms.reduce(
                 (acc, p) =>
-                  acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+                  acc + (p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }) ? 1 : 0),
                 0,
               );
 
               let excusedLeaves = 0;
               activePrograms.forEach((p) => {
                 const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
-                if (hasLeave && !p.assignments.some((a) => a.staffId === s.id))
+                if (hasLeave && !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }))
                   excusedLeaves++;
               });
 
@@ -2970,7 +2966,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             {rosterStaff.map((s, idx) => {
               const shiftsWorked = activePrograms.reduce(
                 (acc, p) =>
-                  acc + (p.assignments.some((a) => a.staffId === s.id) ? 1 : 0),
+                  acc + (p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; }) ? 1 : 0),
                 0,
               );
               const progStart = new Date(startDate);
@@ -2997,7 +2993,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   const hasLeave = hasLeaveOnDate(s.id, p.dateString!, true);
                   if (
                     hasLeave &&
-                    !p.assignments.some((a) => a.staffId === s.id)
+                    !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; })
                   )
                     excusedLeaves++;
                 }
@@ -3277,9 +3273,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                     } else {
                       for (let idx = i - 1; idx >= 0; idx--) {
                         const prevProg = activePrograms[idx];
-                        const worked = prevProg.assignments.some(
-                          (a) => a.staffId === s.id,
-                        );
+                        const worked = prevProg.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
                         const prevLeave = hasLeaveOnDate(s.id, prevProg.dateString!);
                         if (!worked && !prevLeave) count++;
                         else break;
@@ -3377,7 +3371,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   });
 
                   const shiftsTodaySorted = shifts
-                    .filter((s) => s.pickupDate === prog.dateString)
+                    .filter((s) => s.pickupDate === prog.dateString && !s.isHidden)
                     .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
 
                   return (
@@ -4475,7 +4469,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 >
                   <option value="" disabled>Select destination...</option>
                   <optgroup label="Shifts">
-                    {shifts.filter(s => s.pickupDate === staffActionModal.date)
+                    {shifts.filter((s) => s.pickupDate === staffActionModal.date && !s.isHidden)
                       .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime))
                       .map(s => (
                       <option key={s.id} value={s.id} disabled={s.id === staffActionModal.currentShiftId}>Shift at {s.pickupTime}</option>
@@ -4504,7 +4498,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       >
                         <option value="" disabled>Select shift...</option>
                         {(() => {
-                          const dayShifts = shifts.filter(s => s.pickupDate === staffActionModal.date).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                          const dayShifts = shifts.filter((s) => s.pickupDate === staffActionModal.date && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
                           const currIdx = dayShifts.findIndex(s => s.id === staffActionModal.currentShiftId);
                           const validShifts = currIdx !== -1 && currIdx < dayShifts.length - 1 ? [dayShifts[currIdx + 1]] : [];
                           return validShifts.map(s => (

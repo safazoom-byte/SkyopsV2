@@ -1041,6 +1041,13 @@ const App: React.FC = () => {
           
           return (
           <div className="space-y-6 md:space-y-8 animate-in fade-in duration-500">
+                        <CapacityForecast
+              staff={staff}
+              shifts={nonHiddenShifts}
+              leaveRequests={leaveRequests}
+              startDate={startDate}
+              duration={programDuration}
+            />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
               {[
                 {
@@ -1136,13 +1143,7 @@ const App: React.FC = () => {
 
 
 
-                        <CapacityForecast
-              staff={staff}
-              shifts={nonHiddenShifts}
-              leaveRequests={leaveRequests}
-              startDate={startDate}
-              duration={programDuration}
-            />
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
               <div className="lg:col-span-2 space-y-6 md:space-y-8 order-2 lg:order-1">
                 <div className="bg-white p-5 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm">
@@ -1838,6 +1839,18 @@ const App: React.FC = () => {
                 s.id,
                 `Updated shift on ${s.pickupDate} ${s.pickupTime}`,
               );
+              
+              if (s.isHidden) {
+                setPrograms((prev) => {
+                  const updated = prev.map((prog) => ({
+                    ...prog,
+                    assignments: prog.assignments.filter((a) => a.shiftId !== s.id),
+                  }));
+                  const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
+                  if (supabase && changed.length > 0) db.savePrograms(changed);
+                  return updated;
+                });
+              }
             }}
             onBulkUpdate={(updatedShifts) => {
               if (userProfile && !userProfile.isActive) {
@@ -1932,7 +1945,7 @@ const App: React.FC = () => {
             programs={programs}
             flights={flights}
             staff={staff}
-            shifts={nonHiddenShifts}
+            shifts={shifts}
             leaveRequests={leaveRequests}
             incomingDuties={incomingDuties}
             manualAssignments={manualAssignments}
