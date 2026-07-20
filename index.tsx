@@ -2056,7 +2056,8 @@ const App: React.FC = () => {
 
       {/* Mobile Footer Navigation */}
         
-      <nav className="xl:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-200 p-2 px-4 pb-6 pb-safe z-[200] flex justify-between items-center shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] overflow-x-auto gap-2">
+      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[9999] pb-safe">
+        <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar">
         {[
           { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
           { id: "flights", icon: Plane, label: "Flights" },
@@ -2089,7 +2090,8 @@ const App: React.FC = () => {
             </span>
           </button>
         ))}
-      </nav>
+        </nav>
+      </div>
 
       
 
