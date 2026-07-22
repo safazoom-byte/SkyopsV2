@@ -31,6 +31,11 @@ const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onBlur={() => onChange(val)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          }
+        }}
         placeholder={placeholder}
         className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm transition-all focus:ring-2 focus:ring-blue-500 outline-none"
       />

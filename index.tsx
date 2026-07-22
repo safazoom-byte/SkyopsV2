@@ -151,8 +151,8 @@ const App: React.FC = () => {
     | "command"
       >("dashboard");
   const [cloudStatus, setCloudStatus] = useState<
-    "connected" | "offline" | "unconfigured" | "error"
-  >("unconfigured");
+    "connected" | "offline" | "unconfigured" | "error" | "connecting"
+  >("connecting");
   const [cloudError, setCloudError] = useState<string>("");
   const [airports, setAirports] = useState<Airport[]>([]);
 
@@ -317,15 +317,18 @@ const App: React.FC = () => {
         if (mounted) {
           if (airportsData) setAirports(airportsData);
           if (cloudData) {
-          if (cloudData.flights?.length) setFlights(cloudData.flights);
-          if (cloudData.staff?.length) setStaff(cloudData.staff);
-          if (cloudData.shifts?.length) setShifts(cloudData.shifts);
-          if (cloudData.programs?.length) setPrograms(cloudData.programs);
-          if (cloudData.leaveRequests?.length)
-            setLeaveRequests(cloudData.leaveRequests);
-          if (cloudData.incomingDuties?.length)
-            setIncomingDuties(cloudData.incomingDuties);
-          setCloudStatus("connected");
+            if (cloudData.flights?.length) setFlights(cloudData.flights);
+            if (cloudData.staff?.length) setStaff(cloudData.staff);
+            if (cloudData.shifts?.length) setShifts(cloudData.shifts);
+            if (cloudData.programs?.length) setPrograms(cloudData.programs);
+            if (cloudData.leaveRequests?.length)
+              setLeaveRequests(cloudData.leaveRequests);
+            if (cloudData.incomingDuties?.length)
+              setIncomingDuties(cloudData.incomingDuties);
+            setCloudStatus("connected");
+          } else {
+            setCloudStatus("error");
+            setCloudError("Authentication session missing or sync failed");
           }
         }
       } catch (e: any) {
@@ -412,6 +415,67 @@ const App: React.FC = () => {
     };
   }, []);
 
+
+  useEffect(() => {
+    let channel: any = null;
+    if (supabase && cloudStatus === "connected") {
+       channel = supabase.channel('schema-db-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'programs' },
+          (payload) => {
+             if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+               const p = payload.new;
+               let notes = {};
+               let shiftDrivers = {};
+               let actualOffDuty: any[] = [];
+               
+               if (Array.isArray(p.off_duty)) {
+                 const notesHack = p.off_duty.find((o: any) => o.staffId === "NOTES_HACK");
+                 const driversHack = p.off_duty.find((o: any) => o.staffId === "DRIVERS_HACK");
+                 if (notesHack) notes = notesHack.data;
+                 if (driversHack) shiftDrivers = driversHack.data;
+                 actualOffDuty = p.off_duty.filter((o: any) => o.staffId !== "NOTES_HACK" && o.staffId !== "DRIVERS_HACK");
+               }
+               
+               const mappedProg = {
+                 day: p.day,
+                 dateString: p.date_string,
+                 assignments: p.assignments || [],
+                 offDuty: actualOffDuty,
+                 notes: notes,
+                 shiftDrivers: shiftDrivers,
+               };
+               
+               setPrograms(prev => {
+                  const newProgs = [...prev];
+                  const idx = newProgs.findIndex(prog => prog.dateString === mappedProg.dateString);
+                  
+                  if (idx !== -1) {
+                    // Check if anything actually changed to avoid unnecessary re-renders
+                    if (JSON.stringify(newProgs[idx]) === JSON.stringify(mappedProg)) {
+                      return prev;
+                    }
+                    newProgs[idx] = mappedProg;
+                  } else {
+                    newProgs.push(mappedProg);
+                  }
+                  return newProgs.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+               });
+             } else if (payload.eventType === 'DELETE') {
+               setPrograms(prev => prev.filter(prog => prog.dateString !== payload.old.date_string));
+             }
+          }
+        )
+        .subscribe();
+    }
+    return () => {
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [supabase, cloudStatus]);
+
   const confirmGenerateProgram = async (
     manualAssignments: ManualAssignment[] = [],
   ) => {
@@ -460,7 +524,7 @@ const App: React.FC = () => {
     );
     const eligibleStaff = staff.filter((s) => {
       if (s.type === "Local") return true;
-      if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+      if (Array.isArray(s.rosterPeriods) && s.rosterPeriods.length > 0) {
         return s.rosterPeriods.some(
           (p) => p.start <= endDate && p.end >= startDate,
         );
@@ -935,11 +999,13 @@ const App: React.FC = () => {
             </h1>
             <div className="flex items-center gap-2 mt-1.5">
               <div
-                className={`w-2 h-2 rounded-full ${cloudStatus === "connected" ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}
+                className={`w-2 h-2 rounded-full ${cloudStatus === "connected" ? "bg-emerald-500 animate-pulse" : cloudStatus === "connecting" ? "bg-amber-400 animate-pulse" : "bg-rose-500"}`}
               ></div>
               <span className="text-[7px] font-black uppercase text-slate-400 tracking-widest">
                 {cloudStatus === "connected"
                   ? "AI Sync Active"
+                  : cloudStatus === "connecting"
+                  ? "Connecting..."
                   : cloudError
                     ? `Error: ${cloudError}`
                     : "Not Connected"}
@@ -1013,7 +1079,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-[180px] xl:pb-12">
+      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-40 xl:pb-12">
         {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
           <CommandCenter
             currentUser={userProfile}
@@ -1033,7 +1099,7 @@ const App: React.FC = () => {
           const activeShifts = nonHiddenShifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
           const eligibleStaff = staff.filter((s) => {
             if (s.type === "Local") return true;
-            if (s.rosterPeriods && s.rosterPeriods.length > 0) {
+            if (Array.isArray(s.rosterPeriods) && s.rosterPeriods.length > 0) {
               return s.rosterPeriods.some(p => p.start <= endDate && p.end >= startDate);
             }
             return (!s.workFromDate || !s.workToDate || (s.workFromDate <= endDate && s.workToDate >= startDate));
@@ -1058,7 +1124,7 @@ const App: React.FC = () => {
                   bg: "bg-blue-50",
                   breakdown: Object.entries(
                     activeFlights.reduce((acc, f) => {
-                      const match = (f.flightNumber || "").toUpperCase().match(/([A-Z]{2,3})\s*\d/);
+                      const match = String(f.flightNumber || "").toUpperCase().match(/([A-Z]{2,3})\s*\d/);
                       const prefix = match ? match[1] : "OTHER";
                       acc[prefix] = (acc[prefix] || 0) + 1;
                       return acc;
@@ -1967,7 +2033,25 @@ const App: React.FC = () => {
                 });
               }
 
-              setPrograms(updated);
+              setPrograms(prev => {
+                const newProgs = prev.map(p => {
+                  if (changedDateStrings && changedDateStrings.length > 0) {
+                    if (changedDateStrings.includes(p.dateString as string)) {
+                      return updated.find(u => u.dateString === p.dateString) || p;
+                    }
+                    return p;
+                  }
+                  return updated.find(u => u.dateString === p.dateString) || p;
+                });
+                
+                updated.forEach(u => {
+                  if (!newProgs.find(p => p.dateString === u.dateString)) {
+                    newProgs.push(u);
+                  }
+                });
+                
+                return newProgs.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+              });
               if (supabase && changedPrograms.length > 0) {
                  await db.savePrograms(changedPrograms);
               }

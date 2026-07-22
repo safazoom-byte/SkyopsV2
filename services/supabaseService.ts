@@ -144,10 +144,10 @@ export const db = {
 
   async fetchAll() {
     const client = supabase;
-    if (!client) return null;
+    if (!client) throw new Error("Supabase client not initialized");
     try {
       const session = await auth.getSession();
-      if (!session) return null;
+      if (!session) throw new Error("Authentication session missing");
       
       const profile = await this.getUserProfile();
       

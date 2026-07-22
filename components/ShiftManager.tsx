@@ -38,7 +38,11 @@ import {
   X,
   Users,
   PlaneTakeoff,
+  Bot,
+  Unlock,
 } from "lucide-react";
+
+import { AutoScheduleModal } from "./AutoScheduleModal";
 
 interface Props {
   shifts: ShiftConfig[];
@@ -109,6 +113,7 @@ export const ShiftManager: React.FC<Props> = ({
   }
 
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showAutoScheduleModal, setShowAutoScheduleModal] = useState(false);
 
   const [flightModal, setFlightModal] = useState<{
     shiftId: string;
@@ -634,10 +639,9 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
   };
 
   const getShiftHealth = (s: ShiftConfig) => {
-    const totalRequired = Object.values(s.roleCounts || {}).reduce(
-      (acc, v) => acc + (v || 0),
-      0,
-    );
+    const totalRequired = Object.entries(s.roleCounts || {})
+      .filter(([k]) => !k.startsWith('__'))
+      .reduce((acc, [_, v]) => acc + (v || 0), 0);
     const hasShiftLeader = (s.roleCounts?.["Shift Leader"] || 0) > 0;
 
     if (totalRequired < s.minStaff) return "critical";
@@ -759,6 +763,15 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
             <FileDown size={18} className="text-emerald-400" />
             <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white">
               Report
+            </span>
+          </button>
+          <button
+            onClick={() => setShowAutoScheduleModal(true)}
+            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-indigo-500/20"
+          >
+            <Bot size={16} className="group-hover:scale-110 transition-transform" />
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">
+              Auto Schedule
             </span>
           </button>
           <button
@@ -1268,28 +1281,41 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                     />
                                   </td>
                                   <td className="px-2 py-2">
-                                    <input
-                                      type="time"
-                                      className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1"
-                                      value={s.pickupTime}
-                                      onChange={(e) => {
-                                        const pt = e.target.value;
-                                        const updated = {
-                                          ...s,
-                                          pickupTime: pt,
-                                        };
-                                        if (pt > s.endTime) {
-                                          const ed = new Date(s.pickupDate);
-                                          ed.setUTCDate(ed.getUTCDate() + 1);
-                                          updated.endDate = ed
-                                            .toISOString()
-                                            .split("T")[0];
-                                        } else {
-                                          updated.endDate = s.pickupDate;
-                                        }
-                                        onUpdate(updated);
-                                      }}
-                                    />
+                                    <div className="relative group">
+                                      <input
+                                        type="time"
+                                        className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1 pr-8"
+                                        value={s.pickupTime}
+                                        onChange={(e) => {
+                                          const pt = e.target.value;
+                                          const updated = {
+                                            ...s,
+                                            pickupTime: pt,
+                                            roleCounts: { ...(s.roleCounts || {}) }
+                                          };
+                                          delete updated.roleCounts["__ai_scheduled"];
+                                          updated.roleCounts["__manual_scheduled"] = 1;
+                                          
+                                          if (pt > s.endTime) {
+                                            const ed = new Date(s.pickupDate);
+                                            ed.setUTCDate(ed.getUTCDate() + 1);
+                                            updated.endDate = ed
+                                              .toISOString()
+                                              .split("T")[0];
+                                          } else {
+                                            updated.endDate = s.pickupDate;
+                                          }
+                                          onUpdate(updated);
+                                        }}
+                                      />
+                                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                                        {s.roleCounts?.["__ai_scheduled"] ? (
+                                          <span className="text-[7px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 px-1 py-0.5 rounded">AI</span>
+                                        ) : s.roleCounts?.["__manual_scheduled"] ? (
+                                          <span className="text-[7px] font-black uppercase tracking-widest text-emerald-500 bg-emerald-50 px-1 py-0.5 rounded">MAN</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
                                   </td>
                                   <td className="px-2 py-2">
                                     <input
@@ -1305,25 +1331,41 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                     />
                                   </td>
                                   <td className="px-2 py-2">
-                                    <input
-                                      type="time"
-                                      className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1"
-                                      value={s.endTime}
-                                      onChange={(e) => {
-                                        const et = e.target.value;
-                                        const updated = { ...s, endTime: et };
-                                        if (s.pickupTime > et) {
-                                          const ed = new Date(s.pickupDate);
-                                          ed.setUTCDate(ed.getUTCDate() + 1);
-                                          updated.endDate = ed
-                                            .toISOString()
-                                            .split("T")[0];
-                                        } else {
-                                          updated.endDate = s.pickupDate;
-                                        }
-                                        onUpdate(updated);
-                                      }}
-                                    />
+                                    <div className="relative group">
+                                      <input
+                                        type="time"
+                                        className="w-full font-mono bg-transparent text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 rounded px-2 py-1 pr-8"
+                                        value={s.endTime}
+                                        onChange={(e) => {
+                                          const et = e.target.value;
+                                          const updated = { 
+                                            ...s, 
+                                            endTime: et,
+                                            roleCounts: { ...(s.roleCounts || {}) }
+                                          };
+                                          delete updated.roleCounts["__ai_scheduled"];
+                                          updated.roleCounts["__manual_scheduled"] = 1;
+
+                                          if (s.pickupTime > et) {
+                                            const ed = new Date(s.pickupDate);
+                                            ed.setUTCDate(ed.getUTCDate() + 1);
+                                            updated.endDate = ed
+                                              .toISOString()
+                                              .split("T")[0];
+                                          } else {
+                                            updated.endDate = s.pickupDate;
+                                          }
+                                          onUpdate(updated);
+                                        }}
+                                      />
+                                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none">
+                                        {s.roleCounts?.["__ai_scheduled"] ? (
+                                          <span className="text-[7px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 px-1 py-0.5 rounded">AI</span>
+                                        ) : s.roleCounts?.["__manual_scheduled"] ? (
+                                          <span className="text-[7px] font-black uppercase tracking-widest text-emerald-500 bg-emerald-50 px-1 py-0.5 rounded">MAN</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
                                     <div className="text-[9px] font-bold text-slate-400 mt-1 text-center bg-slate-100 rounded">
                                       {calculateShiftDuration(s)}
                                     </div>
@@ -1479,6 +1521,21 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                   </td>
                                   <td className="px-4 py-2">
                                     <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={() => {
+                                        const newRoleCounts = { ...(s.roleCounts || {}) };
+                                        if (newRoleCounts["__locked"]) {
+                                          delete newRoleCounts["__locked"];
+                                        } else {
+                                          newRoleCounts["__locked"] = 1;
+                                        }
+                                        onUpdate({ ...s, roleCounts: newRoleCounts });
+                                      }}
+                                      className={`${s.roleCounts?.["__locked"] ? 'text-blue-500' : 'text-slate-400 hover:text-blue-600'} transition-colors p-1`}
+                                      title={s.roleCounts?.["__locked"] ? "Unlock auto-schedule" : "Lock auto-schedule"}
+                                    >
+                                      {s.roleCounts?.["__locked"] ? <Lock size={14} /> : <Unlock size={14} />}
+                                    </button>
                                     <button
                                       onClick={() => {
                                           onUpdate({ ...s, isHidden: !s.isHidden });
@@ -1896,6 +1953,18 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
             </div>
           </div>
         </div>
+      )}
+
+      {showAutoScheduleModal && (
+        <AutoScheduleModal
+          shifts={shifts}
+          flights={flights}
+          onClose={() => setShowAutoScheduleModal(false)}
+          onApply={(updates) => {
+            updates.forEach(u => onUpdate(u));
+            setShowAutoScheduleModal(false);
+          }}
+        />
       )}
     </div>
   );

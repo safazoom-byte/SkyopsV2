@@ -95,7 +95,7 @@ export interface ShiftConfig {
   minStaff: number;
   maxStaff: number;
   targetPower?: number;
-  roleCounts?: Partial<Record<Skill, number>>;
+  roleCounts?: Record<string, number>;
   flightIds?: string[];
   description?: string;
   isHidden?: boolean;

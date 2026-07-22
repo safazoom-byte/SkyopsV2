@@ -121,76 +121,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     latestStationHealthRef.current = stationHealth;
   }, [stationHealth]);
 
-  useEffect(() => {
-    const doAutoSave = async () => {
-      const currentPrograms = latestProgramsRef.current;
-      const currentVersions = latestVersionsRef.current;
-      
-      if (currentPrograms.length === 0) return;
-      const totalAssignments = currentPrograms.reduce(
-        (acc, p) => acc + p.assignments.length,
-        0,
-      );
-      if (totalAssignments === 0) return;
-
-      const currentStringified = JSON.stringify(currentPrograms);
-      if (currentStringified === lastSavedStringifiedRef.current) return;
-
-      const versionNumber = currentVersions.length > 0 ? Math.max(...currentVersions.map(v => v.versionNumber || 0)) + 1 : 1;
-      const newVersion: ProgramVersion = {
-        id: crypto.randomUUID(),
-        versionNumber,
-        name: `Auto-save ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        createdAt: new Date().toISOString(),
-        periodStart: startDate,
-        periodEnd: endDate,
-        programs: JSON.parse(currentStringified),
-        stationHealth: latestStationHealthRef.current,
-        isAutoSave: true,
-      };
-
-      const updatedVersions = [newVersion, ...currentVersions];
-      const autoSaves = updatedVersions.filter(v => v.isAutoSave);
-      const manualSaves = updatedVersions.filter(v => !v.isAutoSave);
-      
-      // Keep max 5 autosaves
-      let removedVersions: ProgramVersion[] = [];
-      if (autoSaves.length > 5) {
-        removedVersions = removedVersions.concat(autoSaves.splice(5));
-      }
-      // Keep max 5 manual saves
-      if (manualSaves.length > 5) {
-        removedVersions = removedVersions.concat(manualSaves.splice(5));
-      }
-      
-      let finalVersions = [...autoSaves, ...manualSaves].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      setVersions(finalVersions);
-      
-      if (supabase) {
-        await db.saveProgramVersion(newVersion);
-        for (const v of removedVersions) {
-          await db.deleteProgramVersion(v.id);
-        }
-      }
-      
-      lastSavedStringifiedRef.current = currentStringified;
-    };
-
-    const interval = setInterval(doAutoSave, 5 * 60 * 1000); // 5 minutes
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        doAutoSave();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-       clearInterval(interval);
-       document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [startDate, endDate]);
 
   useEffect(() => {
     const loadVersions = async () => {
@@ -740,7 +670,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           .join("-");
 
         const roleChecks = Object.entries(shift.roleCounts || {})
-          .filter(([_, count]) => count > 0)
+          .filter(([k, count]) => count > 0 && !k.startsWith("__"))
           .map(([role, count]) => {
             let roleKey = role;
             if (role === "Load Control") roleKey = "LC";
@@ -3859,13 +3789,13 @@ export const ProgramDisplay: React.FC<Props> = ({
 
                                         {Object.entries(
                                           shift.roleCounts || {},
-                                        ).filter(([_, count]) => count > 0)
+                                        ).filter(([k, count]) => count > 0 && !k.startsWith("__"))
                                           .length > 0 && (
                                           <div className="flex flex-wrap gap-1 border-t border-slate-100 pt-2 mt-1">
                                             {Object.entries(
                                               shift.roleCounts || {},
                                             )
-                                              .filter(([_, count]) => count > 0)
+                                              .filter(([k, count]) => count > 0 && !k.startsWith("__"))
                                               .map(([role, count]) => {
                                                 let roleKey = role;
                                                 if (role === "Load Control")
@@ -4434,8 +4364,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                       type="text" 
                       placeholder="e.g. LL" 
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                      value={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
-                      onChange={(e) => {
+                      defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
+                      onBlur={(e) => {
                         if (onUpdatePrograms) {
                           const newProgs = [...programs];
                           const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
