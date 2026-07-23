@@ -2191,7 +2191,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     setExtendTargetShiftId("");
   };
 
-  const executeMove = (
+  const executeMove = async (
     staffId: string,
     currentShiftId: string,
     date: string,
@@ -2208,6 +2208,8 @@ export const ProgramDisplay: React.FC<Props> = ({
     newPrograms[progIndex] = prog;
 
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
+    let currentLeaves = [...leaveRequests];
+    let leavesChanged = false;
 
     if (!currentShiftId.startsWith("ABSENCE")) {
       const staffObj = activeStaff.find((s) => s.id === staffId);
@@ -2234,16 +2236,13 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
     } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
       // Dragging out of a leave category into either a working shift OR another leave category
-      const leavesToDelete = leaveRequests.filter(l => 
+      const leavesToDelete = currentLeaves.filter(l => 
         l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate
       );
       if (leavesToDelete.length > 0) {
-        Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id))).then(() => {
-           if (onUpdateLeaves) {
-               const remaining = leaveRequests.filter(l => !leavesToDelete.includes(l));
-               onUpdateLeaves(remaining);
-           }
-        });
+        await Promise.all(leavesToDelete.map(l => db.deleteLeave(l.id)));
+        currentLeaves = currentLeaves.filter(l => !leavesToDelete.includes(l));
+        leavesChanged = true;
       }
     }
     
@@ -2299,14 +2298,16 @@ export const ProgramDisplay: React.FC<Props> = ({
           notes: "Assigned visually",
           createdAt: new Date().toISOString()
         };
-        db.upsertLeave(req as any).then(() => {
-          if (onUpdateLeaves) {
-              // Remove previous overlapping leaves from same day to prevent duplicates
-              const prevLeaves = leaveRequests.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
-              onUpdateLeaves([...prevLeaves, req as any]);
-          }
-        });
+        await db.upsertLeave(req as any);
+        // Remove previous overlapping leaves from same day to prevent duplicates
+        currentLeaves = currentLeaves.filter(l => !(l.staffId === staffId && l.startDate <= targetDate && l.endDate >= targetDate));
+        currentLeaves.push(req as any);
+        leavesChanged = true;
       }
+    }
+
+    if (leavesChanged && onUpdateLeaves) {
+        onUpdateLeaves(currentLeaves);
     }
     onUpdatePrograms(newPrograms, [targetDate]);
   };

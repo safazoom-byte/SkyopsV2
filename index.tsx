@@ -2140,7 +2140,7 @@ const App: React.FC = () => {
 
       {/* Mobile Footer Navigation */}
         
-      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[9999] pb-safe">
+      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[500] pb-safe">
         <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar">
         {[
           { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
