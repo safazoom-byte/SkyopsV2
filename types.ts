@@ -1,0 +1,262 @@
+export type Skill =
+  | "Ramp"
+  | "Load Control"
+  | "Lost and Found"
+  | "Shift Leader"
+  | "Operations"
+  | "Labour"
+  | "Security"
+  | "Driver"
+  | "Accountant";
+export type ProficiencyLevel = "Yes" | "No";
+export type StaffCategory = "Local" | "Roster";
+export type WorkPattern = string;
+export type LeaveType =
+  | "Day off"
+  | "Annual leave"
+  | "Lieu leave"
+  | "Sick leave"
+  | "Roster leave"
+  | "NIL";
+
+export const normalizeFlightNumber = (fNum: string) => {
+  return fNum.toUpperCase().replace(/\s/g, '').replace(/^([A-Z]+)0+/, '$1');
+};
+
+export interface Flight {
+  id: string;
+  flightNumber: string;
+  from: string;
+  to: string;
+  sta?: string;
+  std?: string;
+  eta?: string;
+  etd?: string;
+  date: string; // Mandatory date string (YYYY-MM-DD)
+  day: number; // Offset for roster logic
+  type: "Arrival" | "Departure" | "Turnaround";
+  priority: "High" | "Standard" | "Low";
+  aircraftType?: string;
+}
+
+export interface Staff {
+  id: string;
+  name: string;
+  initials: string;
+  staffId?: string;
+  type: StaffCategory;
+  workPattern: WorkPattern;
+  isActive?: boolean;
+  // Flattened for direct DB/Excel mapping
+  isRamp: boolean;
+  isShiftLeader: boolean;
+  isOps: boolean;
+  isLoadControl: boolean;
+  isLostFound: boolean;
+  isLabour: boolean;
+  isSecurity: boolean;
+  isDriver: boolean;
+  isAccountant: boolean;
+  powerRate: number; // 50-100
+  maxShiftsPerWeek: number;
+  workFromDate?: string;
+  workToDate?: string;
+  rosterPeriods?: { start: string; end: string }[];
+  rating?: number;
+  ratingSL?: number;
+  ratingOps?: number;
+  ratingLF?: number;
+  ratingRamp?: number;
+  ratingLC?: number;
+}
+
+export interface IncomingDuty {
+  id: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD of when the shift ended
+  shiftEndTime: string; // HH:mm
+}
+
+export interface LeaveRequest {
+  id: string;
+  staffId: string;
+  startDate: string;
+  endDate: string;
+  type: LeaveType;
+}
+
+export interface ShiftConfig {
+  id: string;
+  day: number; // 0-6
+  pickupDate: string; // YYYY-MM-DD
+  pickupTime: string; // HH:mm
+  endDate: string; // YYYY-MM-DD
+  endTime: string; // HH:mm
+  pickupDayOffset?: number;
+  minStaff: number;
+  maxStaff: number;
+  targetPower?: number;
+  roleCounts?: Record<string, number>;
+  flightIds?: string[];
+  description?: string;
+  isHidden?: boolean;
+}
+
+export interface Assignment {
+  id: string;
+  staffId: string;
+  flightId: string;
+  role: string; // Changed from Skill to string to support combined roles like 'SL+LC'
+  shiftId?: string;
+  manualSortIndex?: number;
+  note?: string;
+  isExtension?: boolean;
+  releaseTime?: string;
+  initialShiftId?: string;
+}
+
+export interface OffDutyRecord {
+  staffId: string;
+  type: LeaveType;
+}
+
+export interface DailyProgram {
+  day: number;
+  dateString?: string;
+  assignments: Assignment[];
+  offDuty?: OffDutyRecord[];
+  notes?: Record<string, string>;
+  shiftDrivers?: Record<string, string>;
+}
+
+export interface ProgramVersion {
+  id: string;
+  versionNumber: number;
+  name: string;
+  createdAt: string; // ISO Date
+  periodStart: string;
+  periodEnd: string;
+  programs: DailyProgram[];
+  stationHealth: number;
+  isAutoSave?: boolean;
+}
+
+export interface ManualAssignment {
+  staffId: string;
+  shiftId: string;
+  roles: string[];
+}
+
+export interface Airport {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface Airline {
+  id: string;
+  name: string;
+  iata_code: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: "super_admin" | "admin" | "planner";
+  airport_id?: string;
+  aiDailyLimit: number;
+  aiWeeklyLimit: number;
+  aiMonthlyLimit: number;
+  maxStaff: number;
+  maxShifts: number;
+  isActive: boolean;
+  companyLogo?: string;
+  skyopsLogo?: string;
+  preparedBy?: string;
+  revisedBy?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userEmail: string;
+  actionType: "CREATE" | "UPDATE" | "DELETE" | "GENERATE_AI" | "IMPORT";
+  entityType:
+    | "FLIGHT"
+    | "STAFF"
+    | "SHIFT"
+    | "PROGRAM"
+    | "LEAVE"
+    | "USER_PROFILE"
+    | "DATABASE";
+  entityId: string;
+  details: string;
+  createdAt: string;
+}
+
+export interface ProgramData {
+  flights: Flight[];
+  staff: Staff[];
+  shifts: ShiftConfig[];
+  programs: DailyProgram[];
+  leaveRequests?: LeaveRequest[];
+  incomingDuties?: IncomingDuty[];
+  manualAssignments?: ManualAssignment[];
+}
+
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    aistudio?: AIStudio;
+  }
+
+  namespace NodeJS {
+    interface ProcessEnv {
+      API_KEY: string;
+    }
+  }
+}
+
+
+export const isStaffActiveOnDate = (staff: Staff, dateString: string): boolean => {
+  if (staff.isActive === false) return false;
+  
+  // Deactivation date overrides everything
+  if (staff.workToDate && dateString > staff.workToDate) return false;
+  
+  if (staff.type === "Roster") {
+    // If they have roster periods, they are active only during those periods
+    if (staff.rosterPeriods && staff.rosterPeriods.length > 0) {
+      return staff.rosterPeriods.some(p => dateString >= p.start && dateString <= p.end);
+    }
+  }
+  
+  if (staff.workFromDate && dateString < staff.workFromDate) return false;
+  
+  return true;
+};
+
+
+export const isStaffActiveInPeriod = (staff: Staff, programs: DailyProgram[]): boolean => {
+  if (programs.length === 0) return staff.isActive !== false;
+  return programs.some(p => isStaffActiveOnDate(staff, p.dateString!));
+};
+
+export const isStaffActiveForDateRange = (staff: Staff, startDateStr: string, endDateStr: string): boolean => {
+  if (staff.isActive === false) return false;
+  if (staff.workToDate && startDateStr > staff.workToDate) return false;
+  if (staff.workFromDate && endDateStr < staff.workFromDate) return false;
+  
+  if (staff.type === "Roster" && staff.rosterPeriods && staff.rosterPeriods.length > 0) {
+    return staff.rosterPeriods.some(p => 
+      // Check if period overlaps with date range
+      p.start <= endDateStr && p.end >= startDateStr
+    );
+  }
+  
+  return true;
+};

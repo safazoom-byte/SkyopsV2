@@ -1,0 +1,1389 @@
+import React, { useState, useEffect } from "react";
+import {
+  Shield,
+  Users,
+  Activity,
+  Settings,
+  Search,
+  AlertTriangle,
+  CheckCircle2,
+  Lock,
+  Plus,
+  Trash2,
+  X,
+  PlaneTakeoff,
+  Star,
+  Download, ChevronDown, ChevronRight,
+} from "lucide-react";
+import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
+import { db, auth, supabase } from "../services/supabaseService";
+import { AirlineManager } from "./AirlineManager";
+
+const NumberInput = ({ label, value, onChange, onBlur, disabled }: any) => {
+  const [val, setVal] = useState(value?.toString() || "0");
+  useEffect(() => { setVal(value?.toString() || "0"); }, [value]);
+
+  return (
+    <div>
+      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+        {label}
+      </label>
+      <input type="number" onWheel={(e) => e.currentTarget.blur()}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => {
+          const num = parseInt(val) || 0;
+          onChange(num);
+          onBlur(num);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        disabled={disabled}
+        className="disabled:bg-slate-100 disabled:text-slate-400 w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+      />
+    </div>
+  );
+};
+
+const SignatureInput = ({ label, value, placeholder, onChange }: any) => {
+  const [val, setVal] = useState(value);
+  useEffect(() => { setVal(value); }, [value]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] font-black uppercase text-slate-400">{label}</label>
+      <input
+        type="text"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => onChange(val)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          }
+        }}
+        placeholder={placeholder}
+        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm transition-all focus:ring-2 focus:ring-blue-500 outline-none"
+      />
+    </div>
+  );
+};
+
+interface CommandCenterProps {
+  currentUser: UserProfile;
+  flights?: Flight[];
+  shifts?: ShiftConfig[];
+  startDate?: string;
+  endDate?: string;
+  staff?: Staff[];
+  onUpdateStaff?: (s: Staff) => void;
+}
+
+export const CommandCenter: React.FC<CommandCenterProps> = ({
+  currentUser,
+  flights = [],
+  shifts = [],
+  startDate,
+  endDate,
+  staff = [],
+  onUpdateStaff,
+}) => {
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines" | "ratings">(() => currentUser.role === "super_admin" ? "audit" : "users");
+  const [newAirportName, setNewAirportName] = useState("");
+  const [newAirportCode, setNewAirportCode] = useState("");
+
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [expandedUsers, setExpandedUsers] = useState<Record<string, boolean>>({});
+  const toggleUserExpanded = (email: string) => setExpandedUsers(prev => ({...prev, [email]: !prev[email]}));
+  
+  
+  const [ratingsSearch, setRatingsSearch] = useState("");
+  const [airports, setAirports] = useState<any[]>([]);
+  const [newUserAirportId, setNewUserAirportId] = useState("");
+
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"super_admin" | "admin" | "planner">(
+    "planner",
+  );
+
+  const [errorModalMessage, setErrorModalMessage] = useState<string | null>(
+    null,
+  );
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<{
+    id: string;
+    email: string;
+  } | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  
+  const exportRatingsExcel = async () => {
+    if (!staff || !staff.length) return;
+    const trafficStaff = staff.filter(s => 
+      !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver
+    );
+    if (!trafficStaff.length) return;
+    
+    const exceljsModule = await import('exceljs');
+    const ExcelJS = exceljsModule.default || exceljsModule;
+    const { default: saveAs } = await import('file-saver');
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'SkyOps';
+    workbook.created = new Date();
+
+    const worksheet = workbook.addWorksheet('Staff Ratings', {
+      views: [{ state: 'frozen', ySplit: 1 }]
+    });
+
+    worksheet.columns = [
+      { header: 'SN', key: 'sn', width: 6 },
+      { header: 'Initials', key: 'initials', width: 12 },
+      { header: 'Name', key: 'name', width: 30 },
+      { header: 'C&G Rate (%)', key: 'cg', width: 18 },
+      { header: 'SL Rate (%)', key: 'sl', width: 18 },
+      { header: 'OPS Rate (%)', key: 'ops', width: 18 },
+      { header: 'LF Rate (%)', key: 'lf', width: 18 },
+      { header: 'RMP Rate (%)', key: 'rmp', width: 18 }
+    ];
+
+    worksheet.getRow(1).eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF0F172A' }
+      };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.protection = { locked: true };
+    });
+
+    trafficStaff.forEach((s, idx) => {
+      const cg = s.rating !== undefined && s.rating !== null ? s.rating : 100;
+      const sl = s.isShiftLeader ? (s.ratingSL !== undefined && s.ratingSL !== null ? s.ratingSL : 100) : "N/A";
+      const ops = s.isOps ? (s.ratingOps !== undefined && s.ratingOps !== null ? s.ratingOps : 100) : "N/A";
+      const lf = s.isLostFound ? (s.ratingLF !== undefined && s.ratingLF !== null ? s.ratingLF : 100) : "N/A";
+      const rmp = s.isRamp ? (s.ratingRamp !== undefined && s.ratingRamp !== null ? s.ratingRamp : 100) : "N/A";
+      
+      const row = worksheet.addRow({
+        sn: idx + 1,
+        initials: s.initials,
+        name: s.name,
+        cg,
+        sl,
+        ops,
+        lf,
+        rmp
+      });
+      
+      row.eachCell((cell, colNumber) => {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.protection = { locked: false };
+        
+        cell.border = {
+          top: {style:'thin', color: {argb:'FFCBD5E1'}},
+          left: {style:'thin', color: {argb:'FFCBD5E1'}},
+          bottom: {style:'thin', color: {argb:'FFCBD5E1'}},
+          right: {style:'thin', color: {argb:'FFCBD5E1'}}
+        };
+
+        if (colNumber <= 3) {
+           cell.protection = { locked: true };
+           cell.font = { bold: true, color: { argb: 'FF334155' } };
+           if (colNumber === 3) cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        } else {
+           if (cell.value === 'N/A') {
+              cell.protection = { locked: true };
+              cell.font = { italic: true, color: { argb: 'FF94A3B8' } };
+              cell.fill = {
+                 type: 'pattern',
+                 pattern: 'solid',
+                 fgColor: { argb: 'FFF1F5F9' }
+              };
+           } else {
+              cell.protection = { locked: false };
+              cell.font = { bold: true, color: { argb: 'FF059669' } };
+              cell.fill = {
+                 type: 'pattern',
+                 pattern: 'solid',
+                 fgColor: { argb: 'FFECFDF5' }
+              };
+              cell.dataValidation = {
+                type: 'whole',
+                operator: 'between',
+                formulae: [0, 100],
+                showErrorMessage: true,
+                errorTitle: 'Invalid Rating',
+                error: 'Rating must be between 0 and 100'
+              };
+           }
+        }
+      });
+    });
+
+    await worksheet.protect('skyops', {
+      selectLockedCells: true,
+      selectUnlockedCells: true,
+      formatCells: false,
+      formatColumns: false,
+      formatRows: false,
+      insertRows: false,
+      insertColumns: false,
+      insertHyperlinks: false,
+      deleteRows: false,
+      deleteColumns: false,
+      sort: true,
+      autoFilter: true
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, 'Staff_Ratings.xlsx');
+  };
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const [fetchedLogs, fetchedUsers, fetchedAirports] = await Promise.all([
+        db.getAuditLogs(),
+        db.getAllUserProfiles(),
+        db.getAirports(),
+      ]);
+      setLogs(fetchedLogs);
+      setUsers(fetchedUsers);
+      setAirports(fetchedAirports);
+    } catch (e) {
+      console.warn("Failed to load command center data", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUpdateUser = async (updatedUser: UserProfile) => {
+    await db.updateUserProfile(updatedUser);
+    setUsers(prev => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+    db.logAction(
+      "UPDATE",
+      "USER_PROFILE",
+      updatedUser.id,
+      `Updated quotas/role for ${updatedUser.email}`,
+    );
+  };
+
+  const handleDeleteUserClick = (id: string, email: string) => {
+    if (id === currentUser.id) {
+      setErrorModalMessage("You cannot delete your own account.");
+      return;
+    }
+    setDeleteConfirmUser({ id, email });
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteConfirmUser) return;
+
+    await db.deleteUserProfile(deleteConfirmUser.id, deleteConfirmUser.email);
+    setUsers(users.filter((u) => u.id !== deleteConfirmUser.id));
+    db.logAction(
+      "DELETE",
+      "USER_PROFILE",
+      deleteConfirmUser.id,
+      `Deleted user ${deleteConfirmUser.email}`,
+    );
+    setDeleteConfirmUser(null);
+  };
+
+  const handleAddUser = async () => {
+    if (!newUserEmail.trim() || !newUserEmail.includes("@")) {
+      setErrorModalMessage("Please enter a valid email address.");
+      return;
+    }
+    if (
+      users.some((u) => u.email.toLowerCase() === newUserEmail.toLowerCase())
+    ) {
+      setErrorModalMessage("A user with this email already exists.");
+      return;
+    }
+
+    const newProfile: UserProfile = {
+      id: crypto.randomUUID(), // Will be updated when they actually sign in via Supabase Auth
+      email: newUserEmail.trim(),
+      role: newUserRole,
+      airport_id: newUserAirportId,
+      aiDailyLimit: 5,
+      aiWeeklyLimit: 20,
+      aiMonthlyLimit: 50,
+      maxStaff: 50,
+      maxShifts: 20,
+      isActive: true,
+    };
+
+    try {
+      const session = await auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/users/create", {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            ...(token ? { "Authorization": `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            email: newUserEmail.trim(),
+            password: newUserPassword,
+            role: newUserRole,
+            airport_id: newUserAirportId
+          })
+        });
+        
+        let data;
+        try {
+          data = await res.json();
+        } catch (err) {
+          setErrorModalMessage("Server returned an invalid response.");
+          return;
+        }
+
+        if (!res.ok) { setErrorModalMessage(data?.error || "Failed to create user"); return; }
+        newProfile.id = data.user.id;
+        // await db.createUserProfile(newProfile); // already done by server
+      setUsers([...users, newProfile]);
+      db.logAction(
+        "CREATE",
+        "USER_PROFILE",
+        newProfile.id,
+        `Created pre-approved user ${newProfile.email}`,
+      );
+      setNewUserEmail("");
+      setNewUserPassword("");
+      setNewUserRole("planner");
+      setIsAddUserModalOpen(false);
+    } catch (err: any) {
+      setErrorModalMessage(err.message || "An unexpected error occurred.");
+    }
+  };
+
+  const filteredLogs = logs.filter(
+    (l) =>
+      l.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      l.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      l.actionType.toLowerCase().includes(searchTerm.toLowerCase()),
+  );
+
+  // Group logs by user email
+  const logsByUser = filteredLogs.reduce(
+    (acc, log) => {
+      if (!acc[log.userEmail]) {
+        acc[log.userEmail] = [];
+      }
+      acc[log.userEmail].push(log);
+      return acc;
+    },
+    {} as Record<string, AuditLog[]>,
+  );
+
+  // Sort users alphabetically
+  const sortedUsers = Object.keys(logsByUser).sort();
+
+  // Sort logs within each user chronologically (newest first)
+  sortedUsers.forEach((email) => {
+    logsByUser[email].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  });
+
+  const sortedUsersList = [...users]
+    .filter(u => currentUser.role === "super_admin" || u.role !== "super_admin")
+    .filter(u => {
+      if (u.email?.toLowerCase() === "safazoom@gmail.com") {
+        return currentUser?.email?.toLowerCase() === "safazoom@gmail.com";
+      }
+      return true;
+    })
+    .sort((a, b) => {
+    if ((a.role === "super_admin" || a.role === "admin") && (b.role === "planner")) return -1;
+    if ((a.role === "planner") && (b.role === "super_admin" || b.role === "admin")) return 1;
+    return (a.email || "").localeCompare(b.email || "");
+  });
+
+  const filteredTrafficStaff = (staff || [])
+    .filter((s) => !s.isLabour && !s.isSecurity && !s.isAccountant && !s.isDriver)
+    .filter(
+      (s) =>
+        s.name.toLowerCase().includes(ratingsSearch.toLowerCase()) ||
+        s.initials.toLowerCase().includes(ratingsSearch.toLowerCase())
+    )
+    .sort((a, b) => a.initials.localeCompare(b.initials));
+
+  if (currentUser.role === "planner") {
+    return (
+      <div className="flex flex-col items-center justify-center h-96 text-slate-500">
+        <Lock size={48} className="mb-4 text-slate-300" />
+        <h2 className="text-xl font-bold text-slate-700">Access Denied</h2>
+        <p>You do not have Master User privileges to view this area.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="bg-slate-950 text-white p-8 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-600/10 blur-[100px] pointer-events-none"></div>
+        <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 relative z-10 text-center sm:text-left">
+          <div className="w-16 h-16 bg-emerald-600 rounded-2xl flex shrink-0 items-center justify-center shadow-lg shadow-emerald-600/20">
+            <Shield size={32} className="text-white" />
+          </div>
+          <div>
+            <h3 className="text-2xl sm:text-3xl font-black uppercase italic tracking-tighter leading-none">
+              Command Center
+            </h3>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mt-2">
+              Master User Override & Audit
+            </p>
+          </div>
+        </div>
+
+        <div className="flex overflow-x-auto sm:flex-wrap bg-slate-900 p-1.5 md:p-1 rounded-xl relative z-10 w-full mt-4 md:mt-0 justify-start md:justify-center gap-1 md:gap-0 hide-scrollbar">
+          {currentUser.role === "super_admin" && (
+          <button
+            onClick={() => setActiveTab("audit")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "audit" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Activity size={14} className="inline mr-1 md:mr-2" /> Black Box
+          </button>
+          )}
+          <button
+            onClick={() => setActiveTab("users")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "users" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Users size={14} className="inline mr-1 md:mr-2" /> Access & Quotas
+          </button>
+          {currentUser.role === "super_admin" && (
+            <button
+              onClick={() => setActiveTab("airports")}
+              className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "airports" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+            >
+              <Activity size={14} className="inline mr-1 md:mr-2" /> Airports
+            </button>
+          )}
+          {currentUser.role === "super_admin" && (
+          <button
+            onClick={() => setActiveTab("airlines")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "airlines" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <PlaneTakeoff size={14} className="inline mr-1 md:mr-2" /> Airlines
+          </button>
+          )}
+          <button
+            onClick={() => setActiveTab("ratings")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "ratings" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Star size={14} className="inline mr-1 md:mr-2" /> Rating System
+          </button>
+          {currentUser.role === "super_admin" && (
+          <button
+            onClick={() => setActiveTab("system")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "system" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <Settings size={14} className="inline mr-1 md:mr-2" /> System Settings
+          </button>
+          )}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center p-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+        </div>
+      ) : activeTab === "audit" && currentUser.role === "super_admin" ? (
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
+            <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+              System Audit Trail
+            </h4>
+            
+            <div className="relative w-full sm:w-auto">
+              <Search
+                size={16}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Search logs..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
+              />
+            </div>
+
+          </div>
+          <div className="max-h-[600px] overflow-y-auto p-6 space-y-8 bg-slate-50/30">
+            {sortedUsers.length === 0 ? (
+              <div className="p-8 text-center text-slate-500">
+                No logs found.
+              </div>
+            ) : (
+              sortedUsers.map((email) => (
+                <div
+                  key={email}
+                  className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm"
+                >
+                  <div 
+                    className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex items-center gap-3 cursor-pointer hover:bg-slate-200 transition-colors"
+                    onClick={() => toggleUserExpanded(email)}
+                  >
+                    <div className="text-slate-400">
+                      {expandedUsers[email] ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs uppercase">
+                      {email.substring(0, 2)}
+                    </div>
+                    <h3 className="font-bold text-slate-800">{email}</h3>
+                    <span className="ml-auto text-xs font-bold text-slate-400 uppercase tracking-wider bg-white px-3 py-1 rounded-full border border-slate-200">
+                      {logsByUser[email].length} Actions
+                    </span>
+                  </div>
+                  {expandedUsers[email] && (
+                  <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
+                    {logsByUser[email].map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-4 hover:bg-slate-50 transition-colors flex items-start gap-4"
+                      >
+                        <div
+                          className={`mt-1 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider shrink-0 w-24 text-center ${
+                            log.actionType === "CREATE"
+                              ? "bg-emerald-100 text-emerald-700"
+                              : log.actionType === "UPDATE"
+                                ? "bg-blue-100 text-blue-700"
+                                : log.actionType === "DELETE"
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-purple-100 text-purple-700"
+                          }`}
+                        >
+                          {log.actionType}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <p className="text-sm font-medium text-slate-900 truncate">
+                              {log.entityType}
+                            </p>
+                            <span className="text-xs font-mono text-slate-400 whitespace-nowrap">
+                              {new Date(log.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-500 mt-1">
+                            {log.details}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      ) : activeTab === "airports" && currentUser.role === "super_admin" ? (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <h4 className="font-bold text-slate-800 mb-6">Manage Airports</h4>
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <input
+                type="text"
+                placeholder="Airport Name"
+                value={newAirportName}
+                onChange={(e) => setNewAirportName(e.target.value)}
+                className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Airport Code (e.g. LHR)"
+                value={newAirportCode}
+                onChange={(e) => setNewAirportCode(e.target.value)}
+                className="w-full sm:w-32 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm"
+              />
+              <button
+                onClick={async () => {
+                  if (newAirportName && newAirportCode) {
+                    const client = supabase;
+                    if (client) {
+                      const { data } = await client.from("airports").insert({ name: newAirportName, code: newAirportCode }).select();
+                      if (data) {
+                        setAirports([...airports, data[0]]);
+                        setNewAirportName("");
+                        setNewAirportCode("");
+                      }
+                    }
+                  }
+                }}
+                className="bg-emerald-600 text-white px-6 rounded-xl font-bold hover:bg-emerald-700"
+              >
+                Add
+              </button>
+            </div>
+            
+            <div className="space-y-3">
+              {airports.map(a => (
+                <div key={a.id} className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <div>
+                    <h5 className="font-bold text-slate-800">{a.name}</h5>
+                    <span className="text-xs text-slate-500 font-mono">{a.code}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : activeTab === "users" ? (
+
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <div>
+              <h4 className="font-bold text-slate-800">User Management</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                Manage access, roles, and AI quotas for all users.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsAddUserModalOpen(true)}
+              className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
+            >
+              <Plus size={16} /> Add User
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {sortedUsersList.map((user) => (
+              <div
+                key={user.id}
+                className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow"
+              >
+                <div className="flex flex-col sm:flex-row gap-4 justify-between items-start mb-6">
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shadow-inner ${
+                        (user.role === "super_admin" || user.role === "admin")
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {(user.email || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-lg">
+                        {user.email || "Unknown User"}
+                      </h4>
+                      <div className="flex gap-2 items-center">
+                      <span
+                        className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md ${
+                          (user.role === "super_admin" || user.role === "admin")
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {user.role}
+                      </span>
+                      {user.airport_id && (
+                        <span className="inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-md bg-blue-100 text-blue-700">
+                          {airports.find(a => a.id === user.airport_id)?.code || "Unknown Airport"}
+                        </span>
+                      )}
+                      </div>
+                    </div>
+                  </div>
+                  <label
+                    className={`flex items-center ${user.email === "safazoom@gmail.com" ? "cursor-not-allowed opacity-60" : "cursor-pointer"} bg-slate-50 p-2 rounded-xl border border-slate-100`}
+                  >
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={user.isActive}
+                        disabled={
+                          user.email === "safazoom@gmail.com" ||
+                          (currentUser.role === "admin" && user.role !== "planner")
+                        }
+                        onChange={(e) =>
+                          handleUpdateUser({
+                            ...user,
+                            isActive: e.target.checked,
+                          })
+                        }
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${user.isActive ? "bg-emerald-500" : "bg-slate-300"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${user.isActive ? "transform translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <span className="ml-3 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      {user.isActive ? "Active" : "Frozen"}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="space-y-6 flex-1">
+                  <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                      Account Settings
+                    </h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Role
+                        </label>
+                        <select
+                          value={user.role}
+                          onChange={(e) =>
+                            handleUpdateUser({
+                              ...user,
+                              role: e.target.value as "super_admin" | "admin" | "planner",
+                            })
+                          }
+                          disabled={
+                            user.id === currentUser.id ||
+                            user.email === "safazoom@gmail.com" || currentUser.role !== "super_admin" } // Cannot change own role or master
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="planner">Planner</option>
+                          {currentUser.role === "super_admin" && <option value="admin">Admin</option>}
+                          {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
+                        </select>
+                      </div>
+                      
+                      {(user.role === "admin" ? currentUser.role === "super_admin" : (currentUser.role === "super_admin" || currentUser.role === "admin")) && (
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                            Airport Assignment
+                          </label>
+                          <select
+                            value={user.airport_id || ""}
+                            onChange={(e) =>
+                              handleUpdateUser({
+                                ...user,
+                                airport_id: e.target.value,
+                              })
+                            }
+                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-sm"
+                          >
+                            <option value="">Select Airport...</option>
+                            {airports.map(a => (
+                              <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                      {user.role === "planner" && (
+                        <>
+                          <NumberInput
+                            label="Max Staff"
+                            value={user.maxStaff}
+                            onChange={(val: number) => setUsers(users.map((u) => u.id === user.id ? { ...u, maxStaff: val } : u))}
+                            onBlur={(val: number) => handleUpdateUser({ ...users.find(u => u.id === user.id)!, maxStaff: val })}
+                            disabled={currentUser.role === "admin"}
+                          />
+                          <NumberInput
+                            label="Max Shifts"
+                            value={user.maxShifts}
+                            onChange={(val: number) => setUsers(users.map((u) => u.id === user.id ? { ...u, maxShifts: val } : u))}
+                            onBlur={(val: number) => handleUpdateUser({ ...users.find(u => u.id === user.id)!, maxShifts: val })}
+                            disabled={currentUser.role === "admin"}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {user.role === "planner" && (
+                  <div className="bg-emerald-50/30 p-4 rounded-2xl border border-emerald-100/50">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-emerald-600/70 mb-3">
+                      AI Quotas
+                    </h5>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <NumberInput
+                        label="Daily"
+                        value={user.aiDailyLimit}
+                        onChange={(val: number) => setUsers(users.map((u) => u.id === user.id ? { ...u, aiDailyLimit: val } : u))}
+                        onBlur={(val: number) => handleUpdateUser({ ...users.find(u => u.id === user.id)!, aiDailyLimit: val })}
+                        disabled={currentUser.role === "admin"}
+                      />
+                      <NumberInput
+                        label="Weekly"
+                        value={user.aiWeeklyLimit}
+                        onChange={(val: number) => setUsers(users.map((u) => u.id === user.id ? { ...u, aiWeeklyLimit: val } : u))}
+                        onBlur={(val: number) => handleUpdateUser({ ...users.find(u => u.id === user.id)!, aiWeeklyLimit: val })}
+                        disabled={currentUser.role === "admin"}
+                      />
+                      <NumberInput
+                        label="Monthly"
+                        value={user.aiMonthlyLimit}
+                        onChange={(val: number) => setUsers(users.map((u) => u.id === user.id ? { ...u, aiMonthlyLimit: val } : u))}
+                        onBlur={(val: number) => handleUpdateUser({ ...users.find(u => u.id === user.id)!, aiMonthlyLimit: val })}
+                        disabled={currentUser.role === "admin"}
+                      />
+                    </div>
+                  </div>
+                  )}
+                </div>
+                <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
+                  <button
+                    onClick={() => handleDeleteUserClick(user.id, user.email)}
+                    disabled={
+                      user.id === currentUser.id ||
+                      user.email === "safazoom@gmail.com" ||
+                      (currentUser.role === "admin" && user.role !== "planner")
+                    }
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-colors ${
+                      user.id === currentUser.id ||
+                      user.email === "safazoom@gmail.com" ||
+                      (currentUser.role === "admin" && user.role !== "planner")
+                        ? "bg-slate-50 text-slate-400 cursor-not-allowed"
+                        : "bg-red-50 text-red-600 hover:bg-red-100 shadow-sm"
+                    }`}
+                  >
+                    <Trash2 size={16} /> Delete User
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : activeTab === "airlines" ? (
+        <AirlineManager flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
+      ) : activeTab === "ratings" ? (
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
+            <div>
+              <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider animate-in fade-in">
+                Rating System
+              </h4>
+              <p className="text-xs text-slate-400 mt-1">
+                Rate traffic staff from 0% to 100%. Shift Power is calculated as the average rating of assigned traffic staff.
+              </p>
+            </div>
+            <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative w-full sm:w-auto">
+                <Search
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  placeholder="Search staff..."
+                  value={ratingsSearch}
+                  onChange={(e) => setRatingsSearch(e.target.value)}
+                  className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
+                />
+              </div>
+              <button
+                onClick={exportRatingsExcel}
+                className="w-full sm:w-auto px-4 py-2 bg-slate-900 text-white rounded-xl font-bold uppercase text-[10px] md:text-xs hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2"
+                title="Download Ratings"
+              >
+                <Download size={14} /> Download Excel
+              </button>
+            </div>
+          </div>
+          
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                  <th className="px-6 py-3 w-20">S/N</th>
+                  <th className="px-6 py-3 w-32">Initials</th>
+                  <th className="px-6 py-3">Name</th>
+                                    <th className="px-6 py-3 w-64 text-center">C&G Rating</th>
+<th className="px-6 py-3 text-center">Role Ratings</th>
+                </tr>
+              </thead>
+              <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                {filteredTrafficStaff.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 font-bold">
+                      No traffic staff members found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredTrafficStaff.map((member, sIdx) => {
+                    const currentVal = member.rating !== undefined && member.rating !== null ? member.rating : 100;
+
+                    const renderRoleStepper = (label: string, colorTheme: 'rose' | 'emerald' | 'indigo' | 'amber', valueKey: keyof typeof member) => {
+                      const val = member[valueKey] !== undefined && member[valueKey] !== null ? member[valueKey] as number : 100;
+                      const colors = {
+                        rose: { text: "text-rose-600", val: "text-rose-700", bg: "bg-rose-500", track: "bg-slate-100", btn: "bg-rose-50 hover:bg-rose-100 text-rose-600", focus: "focus:ring-rose-500" },
+                        emerald: { text: "text-emerald-600", val: "text-emerald-700", bg: "bg-emerald-500", track: "bg-slate-100", btn: "bg-emerald-50 hover:bg-emerald-100 text-emerald-600", focus: "focus:ring-emerald-500" },
+                        indigo: { text: "text-indigo-600", val: "text-indigo-700", bg: "bg-indigo-500", track: "bg-slate-100", btn: "bg-indigo-50 hover:bg-indigo-100 text-indigo-600", focus: "focus:ring-indigo-500" },
+                        amber: { text: "text-amber-600", val: "text-amber-700", bg: "bg-amber-500", track: "bg-slate-100", btn: "bg-amber-50 hover:bg-amber-100 text-amber-600", focus: "focus:ring-amber-500" },
+                      };
+                      const c = colors[colorTheme];
+                      return (
+                        <div key={valueKey} className="flex items-center gap-2 justify-between">
+                          <span className={`text-[10px] font-bold ${c.text} w-8`}>{label}</span>
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.max(0, val - 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>-</button>
+                            <div className={`flex-1 h-1.5 ${c.track} rounded-full overflow-hidden relative min-w-[30px]`}>
+                              <div className={`h-full ${c.bg} transition-all absolute left-0 top-0`} style={{ width: `${val}%` }}></div>
+                            </div>
+                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.min(100, val + 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>+</button>
+                          </div>
+                          <div className="flex items-center gap-0.5">
+                            <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={val}
+                                onWheel={(e) => e.currentTarget.blur()}
+                                onChange={(e) => {
+                                  let v = parseInt(e.target.value, 10);
+                                  if (isNaN(v)) v = 0;
+                                  if (v < 0) v = 0;
+                                  if (v > 100) v = 100;
+                                  if (onUpdateStaff) onUpdateStaff({...member, [valueKey]: v});
+                                }}
+                                className={`w-10 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 ${c.focus} text-[10px] text-slate-700`}
+                            />
+                            <span className="text-[10px] font-bold text-slate-400">%</span>
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-6 py-4 font-bold text-slate-400">{sIdx + 1}</td>
+                        <td className="px-6 py-4">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-mono font-black text-[10px]">
+                            {member.initials}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-slate-900">{member.name}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-4 justify-center">
+                            <div className="flex items-center gap-2 flex-1 max-w-[200px]">
+                              <button
+                                onClick={() => {
+                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.max(0, currentVal - 5) });
+                                }}
+                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
+                              >-</button>
+                              <div className="w-full h-1.5 bg-slate-100 rounded-lg overflow-hidden relative min-w-[40px]">
+                                <div className="h-full bg-emerald-500 absolute left-0 top-0 transition-all" style={{ width: `${currentVal}%` }}></div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.min(100, currentVal + 5) });
+                                }}
+                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
+                              >+</button>
+                            </div>
+                            <div className="flex items-center gap-1 w-16 shrink-0">
+                              <input type="number" onWheel={(e) => e.currentTarget.blur()}
+                                min="0"
+                                max="100"
+                                value={currentVal}
+                                onChange={(e) => {
+                                  let val = parseInt(e.target.value, 10);
+                                  if (isNaN(val)) val = 0;
+                                  if (val < 0) val = 0;
+                                  if (val > 100) val = 100;
+                                  if (onUpdateStaff) {
+                                    onUpdateStaff({
+                                      ...member,
+                                      rating: val
+                                    });
+                                  }
+                                }}
+                                className="w-12 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
+                              />
+                              <span className="text-xs font-bold text-slate-400">%</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-3 min-w-[180px]">
+                            {member.isShiftLeader && renderRoleStepper("SL", "rose", "ratingSL")}
+                            {member.isOps && renderRoleStepper("OPS", "emerald", "ratingOps")}
+                            {member.isLostFound && renderRoleStepper("LF", "indigo", "ratingLF")}
+                            {member.isRamp && renderRoleStepper("RMP", "amber", "ratingRamp")}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">
+            <h4 className="font-bold text-slate-800 mb-6">System Settings & Configurations</h4>
+            
+             {(() => {
+              const myProfile = users.find(u => u.id === currentUser.id) || currentUser;
+              
+              const handleImageUpload = (file: File, field: 'companyLogo' | 'skyopsLogo') => {
+                 const reader = new FileReader();
+                 reader.onload = (e) => {
+                     const img = new Image();
+                     img.onload = async () => {
+                         const canvas = document.createElement('canvas');
+                         let width = img.width;
+                         let height = img.height;
+                         const MAX_WIDTH = 300;
+                         const MAX_HEIGHT = 300;
+                         
+                         if (width > height) {
+                             if (width > MAX_WIDTH) {
+                                 height *= MAX_WIDTH / width;
+                                 width = MAX_WIDTH;
+                             }
+                         } else {
+                             if (height > MAX_HEIGHT) {
+                                 width *= MAX_HEIGHT / height;
+                                 height = MAX_HEIGHT;
+                             }
+                         }
+                         canvas.width = width;
+                         canvas.height = height;
+                         const ctx = canvas.getContext('2d');
+                         ctx?.drawImage(img, 0, 0, width, height);
+                         const resizedBase64 = canvas.toDataURL('image/png', 0.8);
+                         const curr = users.find(u => u.id === currentUser.id) || currentUser;
+                         const updated = { ...curr, [field]: resizedBase64 };
+                         handleUpdateUser(updated);
+                     };
+                     img.src = e.target?.result as string;
+                 };
+                 reader.readAsDataURL(file);
+              };
+
+              return (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">Company Logo (Left)</h5>
+                      {myProfile.companyLogo && (
+                        <img src={myProfile.companyLogo} alt="Company Logo" className="h-16 object-contain mb-4" />
+                      )}
+                      <input 
+                        type="file" 
+                        accept="image/png, image/jpeg"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, 'companyLogo');
+                        }}
+                        className="text-xs" 
+                      />
+                    </div>
+
+                    <div className="border border-slate-200 p-6 rounded-2xl">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-4">SkyOPS Logo (Right)</h5>
+                      {myProfile.skyopsLogo && (
+                        <img src={myProfile.skyopsLogo} alt="SkyOPS Logo" className="h-16 object-contain mb-4" />
+                      )}
+                      <input 
+                        type="file" 
+                        accept="image/png, image/jpeg"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, 'skyopsLogo');
+                        }}
+                        className="text-xs" 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Default Signatures</h5>
+                      <SignatureInput 
+                         label="Prepared By" 
+                         value={myProfile.preparedBy || ""} 
+                         placeholder="e.g. Operation Control Center"
+                         onChange={(val: string) => {
+                             if (val !== myProfile.preparedBy) {
+                                const curr = users.find(u => u.id === currentUser.id) || currentUser;
+                                const updated = { ...curr, preparedBy: val };
+                                handleUpdateUser(updated);
+                             }
+                         }}
+                      />
+                      <div className="mt-2" />
+                      <SignatureInput 
+                         label="Revised By" 
+                         value={myProfile.revisedBy || ""} 
+                         onChange={(val: string) => {
+                             if (val !== myProfile.revisedBy) {
+                                 handleUpdateUser({ ...myProfile, revisedBy: val });
+                             }
+                         }}
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Database Backup</h5>
+                      <p className="text-xs text-slate-400 mb-4">Export or import a full JSON backup of your current database.</p>
+                      <div className="flex gap-4">
+                        <button
+                          onClick={async () => {
+                            const data = await db.exportDatabase();
+                            if (!data) return;
+                            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `skyops_backup_${new Date().toISOString().split('T')[0]}.json`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                          }}
+                          className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold hover:bg-emerald-100 transition-colors"
+                        >
+                          Export Backup
+                        </button>
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept=".json"
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = async (ev) => {
+                                  const text = ev.target?.result as string;
+                                  if (text) {
+                                    const success = await db.importDatabase(text);
+                                    if (success) {
+                                      alert("Database restored successfully! Please refresh the page.");
+                                      window.location.reload();
+                                    } else {
+                                      alert("Failed to restore database. Check console for details.");
+                                    }
+                                  }
+                                };
+                                reader.readAsText(file);
+                              }
+                              e.target.value = '';
+                            }}
+                          />
+                          <button className="px-4 py-2 bg-amber-50 text-amber-600 rounded-xl text-sm font-bold hover:bg-amber-100 transition-colors pointer-events-none">
+                            Restore Backup
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
+                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Database Migration</h5>
+                      <p className="text-xs text-slate-400 mb-4">Assign unassigned data to your currently selected airport.</p>
+                      <div>
+                        <button
+                          onClick={async () => {
+                            if (!currentUser.airport_id) {
+                               setErrorModalMessage("Please select an airport from the top right dropdown first!");
+                               return;
+                            }
+                            const data = await db.migrateUnassignedData(currentUser.airport_id);
+                            if (data.success) {
+                              setErrorModalMessage("Migration successful! Unassigned data is now linked to your current airport. Refreshing...");
+                              setTimeout(() => window.location.reload(), 2000);
+                            } else {
+                              setErrorModalMessage(data.error || "Migration failed.");
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-sm font-bold hover:bg-blue-100 transition-colors"
+                        >
+                          Assign Unassigned Data
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-8 flex justify-end">
+                    <button
+                      onClick={async () => {
+                        await handleUpdateUser({ ...myProfile, companyLogo: "", skyopsLogo: "" });
+                      }}
+                      className="px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-bold hover:bg-red-100 transition-colors"
+                    >
+                      Clear All Logos
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Add User Modal */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+              <h3 className="text-lg font-black uppercase tracking-tight text-slate-800">
+                Add New User
+              </h3>
+              <button
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-slate-200 text-slate-500 hover:bg-slate-300 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Role
+                </label>
+                <select
+                  value={newUserRole}
+                  onChange={(e) =>
+                    setNewUserRole(e.target.value as "super_admin" | "admin" | "planner")
+                  }
+                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  <option value="planner">Planner</option>
+                  {currentUser.role === "super_admin" && <option value="admin">Admin</option>}
+                          {currentUser.role === "super_admin" && <option value="super_admin">Super Admin</option>}
+                </select>
+              </div>
+              {(currentUser.role === "super_admin" || currentUser.role === "admin") && newUserRole !== "super_admin" && (
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                    Airport Assignment
+                  </label>
+                  <select
+                    value={newUserAirportId}
+                    onChange={(e) => setNewUserAirportId(e.target.value)}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="">Select Airport...</option>
+                    {airports.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm leading-relaxed">
+                <strong>Important:</strong> To set up their password, the user must go to the login screen and use the <strong>Sign Up</strong> tab with this exact email address. Once they sign up, their pre-approved account and permissions will be automatically linked.
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end shrink-0">
+              <button
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddUser}
+                className="px-6 py-3 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm shadow-emerald-600/20"
+              >
+                Add User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Modal */}
+      {errorModalMessage && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">Error</h3>
+              <p className="text-slate-500">{errorModalMessage}</p>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-center">
+              <button
+                onClick={() => setErrorModalMessage(null)}
+                className="px-8 py-3 rounded-xl font-bold bg-slate-800 text-white hover:bg-slate-900 transition-colors w-full"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmUser && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[300] p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 mb-2">
+                Delete User?
+              </h3>
+              <p className="text-slate-500">
+                Are you sure you want to delete the user{" "}
+                <strong>{deleteConfirmUser.email}</strong>? This action cannot
+                be undone.
+              </p>
+            </div>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirmUser(null)}
+                className="flex-1 px-4 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteUser}
+                className="flex-1 px-4 py-3 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm shadow-red-600/20"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

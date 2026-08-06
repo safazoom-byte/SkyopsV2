@@ -1,0 +1,27 @@
+{
+  "name": "SkyOPS AI",
+  "short_name": "SkyOPS",
+  "description": "Professional Aviation AI Roster Management",
+  "id": "com.skyops.stationmanager",
+  "dir": "ltr",
+  "lang": "en-US",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2664/2664531.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2664/2664531.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
