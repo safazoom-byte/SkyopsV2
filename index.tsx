@@ -655,48 +655,54 @@ const App: React.FC = () => {
     setShowScanner(false);
 
     if (data.flights && data.flights.length > 0) {
+      const newFlights: Flight[] = [];
       setFlights((prev) => {
         const updated = [...prev];
-        const newFlights: Flight[] = [];
         data.flights.forEach((f: Flight) => {
           const idx = updated.findIndex((existing) => existing.id === f.id);
           if (idx >= 0) updated[idx] = f;
           else updated.push(f);
           newFlights.push(f);
         });
-        if (supabase) db.upsertFlights(newFlights);
         return updated;
       });
+      if (supabase) {
+        try { await db.upsertFlights(newFlights); } catch (e) { console.warn("Failed to sync flights:", e); }
+      }
     }
 
     if (data.staff && data.staff.length > 0) {
+      const newStaff: Staff[] = [];
       setStaff((prev) => {
         const updated = [...prev];
-        const newStaff: Staff[] = [];
         data.staff.forEach((s: Staff) => {
           const idx = updated.findIndex((existing) => existing.id === s.id);
           if (idx >= 0) updated[idx] = s;
           else updated.push(s);
           newStaff.push(s);
         });
-        if (supabase) db.upsertStaffBatch(newStaff);
         return updated;
       });
+      if (supabase) {
+        try { await db.upsertStaffBatch(newStaff); } catch (e) { console.warn("Failed to sync staff:", e); }
+      }
     }
 
     if (data.shifts && data.shifts.length > 0) {
+      const newShifts: ShiftConfig[] = [];
       setShifts((prev) => {
         const updated = [...prev];
-        const newShifts: ShiftConfig[] = [];
         data.shifts.forEach((s: ShiftConfig) => {
           const idx = updated.findIndex((existing) => existing.id === s.id);
           if (idx >= 0) updated[idx] = s;
           else updated.push(s);
           newShifts.push(s);
         });
-        if (supabase) db.upsertShiftsBatch(newShifts);
         return updated;
       });
+      if (supabase) {
+        try { await db.upsertShiftsBatch(newShifts); } catch (e) { console.warn("Failed to sync shifts:", e); }
+      }
     }
 
     setNotification(`AI Sync Complete: ${data.flights?.length || 0} flights, ${data.staff?.length || 0} staff added/updated. (Check your date filters if they don't appear)`);
@@ -1113,9 +1119,9 @@ const App: React.FC = () => {
             startDate={startDate}
             endDate={endDate}
             staff={staff}
-            onUpdateStaff={(s) => {
+            onUpdateStaff={async (s) => {
               setStaff((prev) => prev.map((item) => (item.id === s.id ? s : item)));
-              db.upsertStaff(s);
+              try { await db.upsertStaff(s); } catch (e) { console.warn("Failed to update staff:", e); }
             }}
           />
         )}
@@ -1725,7 +1731,7 @@ const App: React.FC = () => {
             flights={flights}
             startDate={startDate}
             endDate={endDate}
-            onAdd={(f) => {
+            onAdd={async (f) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
@@ -1742,15 +1748,27 @@ const App: React.FC = () => {
                   const newFlights = [...flights];
                   newFlights.splice(duplicateIdx, 1);
                   setFlights([...newFlights, f]);
-                  db.deleteFlight(existing.id);
-                  db.upsertFlight(f);
+                  try {
+                    await db.deleteFlight(existing.id);
+                    await db.upsertFlight(f);
+                  } catch (e) {
+                    setFlights(flights); // rollback
+                    setNotification("Save failed — changes reverted. Check your connection.");
+                    console.warn("Failed to replace flight:", e);
+                  }
                   db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
                 }
                 return;
               }
               
               setFlights((p) => [...p, f]);
-              db.upsertFlight(f);
+              try {
+                await db.upsertFlight(f);
+              } catch (e) {
+                setFlights((p) => p.filter((fl) => fl.id !== f.id)); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to add flight:", e);
+              }
               db.logAction(
                 "CREATE",
                 "FLIGHT",
@@ -1758,7 +1776,7 @@ const App: React.FC = () => {
                 `Added flight ${f.flightNumber}`,
               );
             }}
-            onUpdate={(f) => {
+            onUpdate={async (f) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
@@ -1773,17 +1791,31 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
-                   const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
+                   const prevFlights = [...flights];
+                   const newFlights = prevFlights.filter(fl => fl.id !== existing.id && fl.id !== f.id);
                    setFlights([...newFlights, f]);
-                   db.deleteFlight(existing.id);
-                   db.upsertFlight(f);
+                   try {
+                     await db.deleteFlight(existing.id);
+                     await db.upsertFlight(f);
+                   } catch (e) {
+                     setFlights(prevFlights); // rollback
+                     setNotification("Save failed — changes reverted. Check your connection.");
+                     console.warn("Failed to update flight:", e);
+                   }
                    db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
                 }
                 return;
               }
 
+              const prevFlights = [...flights];
               setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
-              db.upsertFlight(f);
+              try {
+                await db.upsertFlight(f);
+              } catch (e) {
+                setFlights(prevFlights); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to update flight:", e);
+              }
               db.logAction(
                 "UPDATE",
                 "FLIGHT",
@@ -1791,13 +1823,20 @@ const App: React.FC = () => {
                 `Updated flight ${f.flightNumber}`,
               );
             }}
-            onDelete={(id) => {
+            onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const prevFlights = [...flights];
               setFlights((p) => p.filter((f) => f.id !== id));
-              db.deleteFlight(id);
+              try {
+                await db.deleteFlight(id);
+              } catch (e) {
+                setFlights(prevFlights); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to delete flight:", e);
+              }
               db.logAction("DELETE", "FLIGHT", id, `Deleted flight`);
             }}
             onOpenScanner={() => {
@@ -1809,7 +1848,7 @@ const App: React.FC = () => {
         {activeTab === "staff" && (
           <StaffManager
             staff={staff}
-            onUpdate={(s) => {
+            onUpdate={async (s) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
@@ -1827,12 +1866,19 @@ const App: React.FC = () => {
                 );
                 return;
               }
+              const prevStaff = [...staff];
               setStaff((p) =>
                 p.find((o) => o.id === s.id)
                   ? p.map((o) => (o.id === s.id ? s : o))
                   : [...p, s],
               );
-              db.upsertStaff(s);
+              try {
+                await db.upsertStaff(s);
+              } catch (e) {
+                setStaff(prevStaff); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to upsert staff:", e);
+              }
               db.logAction(
                 isNew ? "CREATE" : "UPDATE",
                 "STAFF",
@@ -1840,13 +1886,21 @@ const App: React.FC = () => {
                 `${isNew ? "Added" : "Updated"} staff ${s.initials}`,
               );
             }}
-            onDelete={(id) => {
+            onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const prevStaff = [...staff];
               setStaff((p) => p.filter((s) => s.id !== id));
-              db.deleteStaff(id);
+              try {
+                await db.deleteStaff(id);
+              } catch (e) {
+                setStaff(prevStaff); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to delete staff:", e);
+                return;
+              }
               db.logAction("DELETE", "STAFF", id, `Deleted staff member`);
               // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
               setPrograms((prev) => {
@@ -1905,7 +1959,7 @@ const App: React.FC = () => {
             leaveRequests={leaveRequests}
             startDate={startDate}
             endDate={endDate}
-            onAdd={(s) => {
+            onAdd={async (s) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
@@ -1917,7 +1971,13 @@ const App: React.FC = () => {
                 return;
               }
               setShifts((p) => [...p, s]);
-              db.upsertShift(s);
+              try {
+                await db.upsertShift(s);
+              } catch (e) {
+                setShifts((p) => p.filter((sh) => sh.id !== s.id)); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to add shift:", e);
+              }
               db.logAction(
                 "CREATE",
                 "SHIFT",
@@ -1925,13 +1985,20 @@ const App: React.FC = () => {
                 `Added shift on ${s.pickupDate} ${s.pickupTime}`,
               );
             }}
-            onUpdate={(s) => {
+            onUpdate={async (s) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const prevShifts = [...shifts];
               setShifts((p) => p.map((o) => (o.id === s.id ? s : o)));
-              db.upsertShift(s);
+              try {
+                await db.upsertShift(s);
+              } catch (e) {
+                setShifts(prevShifts); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to update shift:", e);
+              }
               db.logAction(
                 "UPDATE",
                 "SHIFT",
@@ -1955,11 +2022,12 @@ const App: React.FC = () => {
                 });
               }
             }}
-            onBulkUpdate={(updatedShifts) => {
+            onBulkUpdate={async (updatedShifts) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const prevShifts = [...shifts];
               setShifts((p) => {
                 const newShifts = [...p];
                 updatedShifts.forEach(us => {
@@ -1968,16 +2036,28 @@ const App: React.FC = () => {
                 });
                 return newShifts;
               });
-              // Perform bulk DB update
-              db.upsertShiftsBatch(updatedShifts);
+              try {
+                await db.upsertShiftsBatch(updatedShifts);
+              } catch (e) {
+                setShifts(prevShifts); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to bulk update shifts:", e);
+              }
             }}
-            onDelete={(id) => {
+            onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const prevShifts = [...shifts];
               setShifts((p) => p.filter((s) => s.id !== id));
-              db.deleteShift(id);
+              try {
+                await db.deleteShift(id);
+              } catch (e) {
+                setShifts(prevShifts); // rollback
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to delete shift:", e);
+              }
               db.logAction("DELETE", "SHIFT", id, `Deleted shift`);
               // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
               setPrograms((prev) => {
@@ -2005,19 +2085,33 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and create the new one?`)) {
+                  const prevFlights = [...flights];
                   const newFlights = [...flights];
                   newFlights.splice(duplicateIdx, 1);
                   setFlights([...newFlights, f]);
-                  db.deleteFlight(existing.id);
-                  db.upsertFlight(f);
+                  try {
+                    await db.deleteFlight(existing.id);
+                    await db.upsertFlight(f);
+                  } catch (e) {
+                    setFlights(prevFlights);
+                    setNotification("Save failed — changes reverted. Check your connection.");
+                    console.warn("Failed to replace flight:", e);
+                  }
                   db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
                 }
                 return;
               }
+              const prevFlights2 = [...flights];
               setFlights((p) => [...p, f]);
-              db.upsertFlight(f);
+              try {
+                await db.upsertFlight(f);
+              } catch (e) {
+                setFlights(prevFlights2);
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to add flight:", e);
+              }
             }}
-            onUpdateFlight={(f) => {
+            onUpdateFlight={async (f) => {
               if (userProfile && !userProfile.isActive) return;
               const normFNum = normalizeFlightNumber(f.flightNumber);
               const duplicateIdx = flights.findIndex(
@@ -2029,21 +2123,42 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
+                   const prevFlights = [...flights];
                    const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
                    setFlights([...newFlights, f]);
-                   db.deleteFlight(existing.id);
-                   db.upsertFlight(f);
+                   try {
+                     await db.deleteFlight(existing.id);
+                     await db.upsertFlight(f);
+                   } catch (e) {
+                     setFlights(prevFlights);
+                     setNotification("Save failed — changes reverted. Check your connection.");
+                     console.warn("Failed to update flight:", e);
+                   }
                    db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
                 }
                 return;
               }
+              const prevFlights3 = [...flights];
               setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
-              db.upsertFlight(f);
+              try {
+                await db.upsertFlight(f);
+              } catch (e) {
+                setFlights(prevFlights3);
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to update flight:", e);
+              }
             }}
-            onDeleteFlight={(id) => {
+            onDeleteFlight={async (id) => {
               if (userProfile && !userProfile.isActive) return;
+              const prevFlights4 = [...flights];
               setFlights((p) => p.filter((f) => f.id !== id));
-              db.deleteFlight(id);
+              try {
+                await db.deleteFlight(id);
+              } catch (e) {
+                setFlights(prevFlights4);
+                setNotification("Save failed — changes reverted. Check your connection.");
+                console.warn("Failed to delete flight:", e);
+              }
             }}
           />
         )}
@@ -2094,10 +2209,15 @@ const App: React.FC = () => {
                 return newProgs.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
               });
               if (supabase && changedPrograms.length > 0) {
-                 await db.savePrograms(changedPrograms);
+                try {
+                  await db.savePrograms(changedPrograms);
+                } catch (e) {
+                  setNotification("Save failed — program not saved. Check your connection.");
+                  console.warn("Failed to save programs:", e);
+                }
               }
             }}
-            onRestoreVersion={(v) => {
+            onRestoreVersion={async (v) => {
               setPrograms(prev => {
                 const merged = [...prev];
                 v.programs.forEach(newP => {
@@ -2111,7 +2231,9 @@ const App: React.FC = () => {
               setEndDate(v.periodEnd);
               setStationHealth(v.stationHealth);
               setNotification(`Restored version: ${v.name}`);
-              if (supabase) db.savePrograms(v.programs);
+              if (supabase) {
+                try { await db.savePrograms(v.programs); } catch (e) { console.warn("Failed to save restored version:", e); }
+              }
             }}
             onUpdateLeaves={async (l: LeaveRequest[]) => {
               setLeaveRequests(l);
