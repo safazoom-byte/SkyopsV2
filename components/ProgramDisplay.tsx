@@ -48,6 +48,18 @@ import {
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
 
+const getNextDateStr = (dateStr: string) => {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().split("T")[0];
+};
+
+const getPrevDateStr = (dateStr: string) => {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().split("T")[0];
+};
+
 interface Props {
   programs: DailyProgram[];
   flights: Flight[];
@@ -493,13 +505,24 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
   };
 
-  const getShiftHours = (shiftId: string, assign?: any) => {
+  const getShiftHours = (shiftId: string, assign?: any, dateString?: string) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
     const startStr = assign?.customStartTime || shift.pickupTime;
-    const endStr = assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime;
+    const endStr = assign?.customEndTime || (assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime);
     const [ph, pm] = startStr.split(":").map(Number);
     const [sh, sm] = endStr.split(":").map(Number);
+    
+    const actualDateString = assign?.dateString || dateString;
+    if (assign?.customEndDate && actualDateString) {
+      const startDt = new Date(`${actualDateString}T12:00:00Z`);
+      startDt.setHours(ph, pm, 0, 0);
+      const endDt = new Date(`${assign.customEndDate}T12:00:00Z`);
+      endDt.setHours(sh, sm, 0, 0);
+      const diffMs = endDt.getTime() - startDt.getTime();
+      return Math.max(0, parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1)));
+    }
+    
     let hours = sh - ph + (sm - pm) / 60;
     if (sh < ph) hours += 24;
     return hours;
@@ -509,7 +532,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     return activePrograms.reduce((acc, p) => {
       const assign = p.assignments.find((a) => a.staffId === staffId);
       if (assign) {
-        return acc + getShiftHours(assign.shiftId || "", assign);
+        return acc + getShiftHours(assign.shiftId || "", assign, p.dateString);
       }
       return acc;
     }, 0);
@@ -623,14 +646,21 @@ export const ProgramDisplay: React.FC<Props> = ({
       const s = getShift(a.shiftId || "");
       if (s) {
         const startStr = a.customStartTime || s.pickupTime;
-        const endStr = a.isExtension && a.releaseTime ? a.releaseTime : s.endTime;
+        const endStr = a.customEndTime || (a.isExtension && a.releaseTime ? a.releaseTime : s.endTime);
         const [ph, pm] = startStr.split(":").map(Number);
         const [sh, sm] = endStr.split(":").map(Number);
         const startDt = new Date(`${a.dateString}T12:00:00Z`);
         startDt.setHours(ph, pm, 0, 0);
-        const endDt = new Date(`${a.dateString}T12:00:00Z`);
-        endDt.setHours(sh, sm, 0, 0);
-        if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
+        
+        let endDt: Date;
+        if (a.customEndDate) {
+          endDt = new Date(`${a.customEndDate}T12:00:00Z`);
+          endDt.setHours(sh, sm, 0, 0);
+        } else {
+          endDt = new Date(`${a.dateString}T12:00:00Z`);
+          endDt.setHours(sh, sm, 0, 0);
+          if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
+        }
         
         // We only consider previous shifts (ones that started before this current one).
         // If they end after currentShiftStart, diffMs will be negative and throw a warning.
@@ -1186,7 +1216,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             shiftStart.setHours(ph, pm, 0, 0);
             const rest = calculateRestHours(s.id, shiftStart);
             const restWarning = rest !== null && rest < minRestHours;
-            const duration = `${getShiftHours(assign.shiftId || "", assign).toFixed(1)}H`;
+            const duration = `${getShiftHours(assign.shiftId || "", assign, p.dateString).toFixed(1)}H`;
             const restLabel = rest !== null ? ` [${rest.toFixed(1)}H]` : "";
             const displayTime = assign.customStartTime || shift.pickupTime;
             const cellText = `${duration}\n${displayTime}${restLabel}`;
@@ -2478,6 +2508,54 @@ export const ProgramDisplay: React.FC<Props> = ({
     setExtendTargetShiftId("");
   };
 
+  const handleSaveCustomDuty = () => {
+    if (!staffActionModal || !onUpdatePrograms) return;
+    
+    const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
+    if (progIdx === -1) return;
+    
+    const newProgs = [...programs];
+    const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+    const aIdx = currentProg.assignments.findIndex(
+      a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId
+    );
+    
+    if (aIdx !== -1) {
+      const assignment = currentProg.assignments[aIdx];
+      const shift = getShift(assignment.shiftId || "");
+      
+      let finalEndDate: string | undefined = undefined;
+      if (localEndTime) {
+        const startStr = localStartTime || (shift ? shift.pickupTime : "");
+        if (startStr) {
+          const [ph, pm] = startStr.split(":").map(Number);
+          const [sh, sm] = localEndTime.split(":").map(Number);
+          if (sh < ph) {
+            // Next day
+            finalEndDate = getNextDateStr(staffActionModal.date);
+          } else {
+            // Same day
+            finalEndDate = staffActionModal.date;
+          }
+        }
+      }
+      
+      currentProg.assignments[aIdx] = {
+        ...assignment,
+        note: localNote || undefined,
+        customStartTime: localStartTime || undefined,
+        customEndTime: localEndTime || undefined,
+        customEndDate: finalEndDate
+      };
+      
+      newProgs[progIdx] = currentProg;
+      onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+    }
+    
+    // Close the modal
+    setStaffActionModal(null);
+  };
+
   const executeMove = (
     staffId: string,
     currentShiftId: string,
@@ -2642,6 +2720,30 @@ export const ProgramDisplay: React.FC<Props> = ({
     date: string;
     role: string;
   } | null>(null);
+
+  const [localNote, setLocalNote] = useState("");
+  const [localStartTime, setLocalStartTime] = useState("");
+  const [localEndTime, setLocalEndTime] = useState("");
+
+  useEffect(() => {
+    if (staffActionModal) {
+      const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
+      if (progIdx !== -1) {
+        const assign = programs[progIdx].assignments.find(
+          a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId
+        );
+        if (assign) {
+          setLocalNote(assign.note || "");
+          setLocalStartTime(assign.customStartTime || "");
+          setLocalEndTime(assign.customEndTime || "");
+          return;
+        }
+      }
+    }
+    setLocalNote("");
+    setLocalStartTime("");
+    setLocalEndTime("");
+  }, [staffActionModal, programs]);
 
   const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
     e.stopPropagation();
@@ -2883,7 +2985,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                         content = (
                           <div className="flex flex-col items-center gap-1">
                             <span className={`text-[9px] font-bold opacity-85 ${restWarning ? "text-white/90" : dayOffRestWarning ? "text-slate-700" : "text-slate-500"}`}>
-                              {getShiftHours(assign.shiftId || "", assign).toFixed(1)}H
+                              {getShiftHours(assign.shiftId || "", assign, p.dateString).toFixed(1)}H
                             </span>
                             <span
                               className={`font-bold ${restWarning ? "text-white" : dayOffRestWarning ? "text-slate-800" : "text-slate-900"}`}
@@ -4689,43 +4791,36 @@ export const ProgramDisplay: React.FC<Props> = ({
                         type="text" 
                         placeholder="e.g. LL" 
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
-                        onBlur={(e) => {
-                          if (onUpdatePrograms) {
-                            const newProgs = [...programs];
-                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
-                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
-                            if (aIdx !== -1) {
-                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
-                              newProgs[progIdx] = currentProg;
-                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
-                            }
-                          }
-                        }}
+                        value={localNote}
+                        onChange={(e) => setLocalNote(e.target.value)}
                       />
                     </div>
-                    <div className="mb-4">
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Duty Time (HH:MM)</label>
-                      <input 
-                        type="text" 
-                        placeholder="e.g. 14:30" 
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.customStartTime || ""}
-                        onBlur={(e) => {
-                          if (onUpdatePrograms) {
-                            const val = e.target.value.trim();
-                            const newProgs = [...programs];
-                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
-                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
-                            if (aIdx !== -1) {
-                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], customStartTime: val || undefined };
-                              newProgs[progIdx] = currentProg;
-                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
-                            }
-                          }
-                        }}
-                      />
+                    <div className="mb-4 grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Time</label>
+                        <input 
+                          type="time" 
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                          value={localStartTime}
+                          onChange={(e) => setLocalStartTime(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom End Time</label>
+                        <input 
+                          type="time" 
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                          value={localEndTime}
+                          onChange={(e) => setLocalEndTime(e.target.value)}
+                        />
+                      </div>
                     </div>
+                    <button
+                      onClick={handleSaveCustomDuty}
+                      className="w-full p-3 mb-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-sm shadow-md flex items-center justify-center gap-2"
+                    >
+                      Save Duty Settings & Notes
+                    </button>
                   </>
                 )}
 
