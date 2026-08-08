@@ -1826,16 +1826,6 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (richText.length > 0) richText.push({ text: "\n" });
               richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
           }
-
-          const shiftDriverId = prog.shiftDrivers?.[shift.id];
-          if (shiftDriverId) {
-              const dObj = staff.find(s => s.id === shiftDriverId);
-              if (dObj) {
-                  if (richText.length > 0) richText.push({ text: "\n" });
-                  richText.push({ text: dObj.initials, font: { color: { argb: 'FF15803D' }, bold: true } });
-              }
-          }
-          
           if (richText.length > 0) {
               staffCell.value = { richText };
           }
