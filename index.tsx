@@ -184,6 +184,17 @@ const App: React.FC = () => {
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [incomingDuties, setIncomingDuties] = useState<IncomingDuty[]>([]);
 
+  const programsRef = useRef<DailyProgram[]>([]);
+  const leaveRequestsRef = useRef<LeaveRequest[]>([]);
+
+  useEffect(() => {
+    programsRef.current = programs;
+  }, [programs]);
+
+  useEffect(() => {
+    leaveRequestsRef.current = leaveRequests;
+  }, [leaveRequests]);
+
   const [stationHealth, setStationHealth] = useState<number>(100);
   const [alerts, setAlerts] = useState<
     { type: "danger" | "warning"; message: string }[]
@@ -366,7 +377,7 @@ const App: React.FC = () => {
         return;
       }
       try {
-        const s = await auth.getSession();
+        const s = await auth.getSession(6000);
         if (mounted) {
           setSession(s);
           if (s) {
@@ -654,55 +665,59 @@ const App: React.FC = () => {
   const handleDataExtracted = async (data: any) => {
     setShowScanner(false);
 
-    if (data.flights && data.flights.length > 0) {
-      const newFlights: Flight[] = [];
-      setFlights((prev) => {
-        const updated = [...prev];
-        data.flights.forEach((f: Flight) => {
-          const idx = updated.findIndex((existing) => existing.id === f.id);
-          if (idx >= 0) updated[idx] = f;
-          else updated.push(f);
-          newFlights.push(f);
+    try {
+      if (data.flights && data.flights.length > 0) {
+        const newFlights: Flight[] = [];
+        setFlights((prev) => {
+          const updated = [...prev];
+          data.flights.forEach((f: Flight) => {
+            const idx = updated.findIndex((existing) => existing.id === f.id);
+            if (idx >= 0) updated[idx] = f;
+            else updated.push(f);
+            newFlights.push(f);
+          });
+          return updated;
         });
-        return updated;
-      });
-      if (supabase) {
-        try { await db.upsertFlights(newFlights); } catch (e) { console.warn("Failed to sync flights:", e); }
+        if (supabase) {
+          await db.upsertFlights(newFlights);
+        }
       }
-    }
 
-    if (data.staff && data.staff.length > 0) {
-      const newStaff: Staff[] = [];
-      setStaff((prev) => {
-        const updated = [...prev];
-        data.staff.forEach((s: Staff) => {
-          const idx = updated.findIndex((existing) => existing.id === s.id);
-          if (idx >= 0) updated[idx] = s;
-          else updated.push(s);
-          newStaff.push(s);
+      if (data.staff && data.staff.length > 0) {
+        const newStaff: Staff[] = [];
+        setStaff((prev) => {
+          const updated = [...prev];
+          data.staff.forEach((s: Staff) => {
+            const idx = updated.findIndex((existing) => existing.id === s.id);
+            if (idx >= 0) updated[idx] = s;
+            else updated.push(s);
+            newStaff.push(s);
+          });
+          return updated;
         });
-        return updated;
-      });
-      if (supabase) {
-        try { await db.upsertStaffBatch(newStaff); } catch (e) { console.warn("Failed to sync staff:", e); }
+        if (supabase) {
+          await db.upsertStaffBatch(newStaff);
+        }
       }
-    }
 
-    if (data.shifts && data.shifts.length > 0) {
-      const newShifts: ShiftConfig[] = [];
-      setShifts((prev) => {
-        const updated = [...prev];
-        data.shifts.forEach((s: ShiftConfig) => {
-          const idx = updated.findIndex((existing) => existing.id === s.id);
-          if (idx >= 0) updated[idx] = s;
-          else updated.push(s);
-          newShifts.push(s);
+      if (data.shifts && data.shifts.length > 0) {
+        const newShifts: ShiftConfig[] = [];
+        setShifts((prev) => {
+          const updated = [...prev];
+          data.shifts.forEach((s: ShiftConfig) => {
+            const idx = updated.findIndex((existing) => existing.id === s.id);
+            if (idx >= 0) updated[idx] = s;
+            else updated.push(s);
+            newShifts.push(s);
+          });
+          return updated;
         });
-        return updated;
-      });
-      if (supabase) {
-        try { await db.upsertShiftsBatch(newShifts); } catch (e) { console.warn("Failed to sync shifts:", e); }
+        if (supabase) {
+          await db.upsertShiftsBatch(newShifts);
+        }
       }
+    } catch (e) {
+      console.error("Failed to save extracted data:", e);
     }
 
     setNotification(`AI Sync Complete: ${data.flights?.length || 0} flights, ${data.staff?.length || 0} staff added/updated. (Check your date filters if they don't appear)`);
@@ -1119,9 +1134,9 @@ const App: React.FC = () => {
             startDate={startDate}
             endDate={endDate}
             staff={staff}
-            onUpdateStaff={async (s) => {
+            onUpdateStaff={(s) => {
               setStaff((prev) => prev.map((item) => (item.id === s.id ? s : item)));
-              try { await db.upsertStaff(s); } catch (e) { console.warn("Failed to update staff:", e); }
+              db.upsertStaff(s);
             }}
           />
         )}
@@ -1736,6 +1751,7 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
+              const oldFlights = [...flights];
               const normFNum = normalizeFlightNumber(f.flightNumber);
               const duplicateIdx = flights.findIndex(
                 (existing) =>
@@ -1751,12 +1767,12 @@ const App: React.FC = () => {
                   try {
                     await db.deleteFlight(existing.id);
                     await db.upsertFlight(f);
-                  } catch (e) {
-                    setFlights(flights); // rollback
-                    setNotification("Save failed — changes reverted. Check your connection.");
-                    console.warn("Failed to replace flight:", e);
+                    await db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
+                  } catch (err) {
+                    console.error("Failed to add flight, rolling back:", err);
+                    setFlights(oldFlights);
+                    setNotification("Database error: Failed to add flight.");
                   }
-                  db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
                 }
                 return;
               }
@@ -1764,23 +1780,24 @@ const App: React.FC = () => {
               setFlights((p) => [...p, f]);
               try {
                 await db.upsertFlight(f);
-              } catch (e) {
-                setFlights((p) => p.filter((fl) => fl.id !== f.id)); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to add flight:", e);
+                await db.logAction(
+                  "CREATE",
+                  "FLIGHT",
+                  f.id,
+                  `Added flight ${f.flightNumber}`,
+                );
+              } catch (err) {
+                console.error("Failed to add flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to add flight.");
               }
-              db.logAction(
-                "CREATE",
-                "FLIGHT",
-                f.id,
-                `Added flight ${f.flightNumber}`,
-              );
             }}
             onUpdate={async (f) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
+              const oldFlights = [...flights];
               const normFNum = normalizeFlightNumber(f.flightNumber);
               const duplicateIdx = flights.findIndex(
                 (existing) =>
@@ -1791,53 +1808,51 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
-                   const prevFlights = [...flights];
-                   const newFlights = prevFlights.filter(fl => fl.id !== existing.id && fl.id !== f.id);
+                   const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
                    setFlights([...newFlights, f]);
                    try {
                      await db.deleteFlight(existing.id);
                      await db.upsertFlight(f);
-                   } catch (e) {
-                     setFlights(prevFlights); // rollback
-                     setNotification("Save failed — changes reverted. Check your connection.");
-                     console.warn("Failed to update flight:", e);
+                     await db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
+                   } catch (err) {
+                     console.error("Failed to update flight, rolling back:", err);
+                     setFlights(oldFlights);
+                     setNotification("Database error: Failed to update flight.");
                    }
-                   db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
                 }
                 return;
               }
 
-              const prevFlights = [...flights];
               setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
               try {
                 await db.upsertFlight(f);
-              } catch (e) {
-                setFlights(prevFlights); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to update flight:", e);
+                await db.logAction(
+                  "UPDATE",
+                  "FLIGHT",
+                  f.id,
+                  `Updated flight ${f.flightNumber}`,
+                );
+              } catch (err) {
+                console.error("Failed to update flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to update flight.");
               }
-              db.logAction(
-                "UPDATE",
-                "FLIGHT",
-                f.id,
-                `Updated flight ${f.flightNumber}`,
-              );
             }}
             onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
-              const prevFlights = [...flights];
+              const oldFlights = [...flights];
               setFlights((p) => p.filter((f) => f.id !== id));
               try {
                 await db.deleteFlight(id);
-              } catch (e) {
-                setFlights(prevFlights); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to delete flight:", e);
+                await db.logAction("DELETE", "FLIGHT", id, `Deleted flight`);
+              } catch (err) {
+                console.error("Failed to delete flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to delete flight.");
               }
-              db.logAction("DELETE", "FLIGHT", id, `Deleted flight`);
             }}
             onOpenScanner={() => {
               setScannerTarget("flights");
@@ -1853,6 +1868,7 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
+              const oldStaff = [...staff];
               const isNew = !staff.find((o) => o.id === s.id);
               if (
                 isNew &&
@@ -1866,7 +1882,6 @@ const App: React.FC = () => {
                 );
                 return;
               }
-              const prevStaff = [...staff];
               setStaff((p) =>
                 p.find((o) => o.id === s.id)
                   ? p.map((o) => (o.id === s.id ? s : o))
@@ -1874,75 +1889,89 @@ const App: React.FC = () => {
               );
               try {
                 await db.upsertStaff(s);
-              } catch (e) {
-                setStaff(prevStaff); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to upsert staff:", e);
+                await db.logAction(
+                  isNew ? "CREATE" : "UPDATE",
+                  "STAFF",
+                  s.id,
+                  `${isNew ? "Added" : "Updated"} staff ${s.initials}`,
+                );
+              } catch (err) {
+                console.error("Failed to update staff, rolling back:", err);
+                setStaff(oldStaff);
+                setNotification("Database error: Failed to save staff.");
               }
-              db.logAction(
-                isNew ? "CREATE" : "UPDATE",
-                "STAFF",
-                s.id,
-                `${isNew ? "Added" : "Updated"} staff ${s.initials}`,
-              );
             }}
             onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
-              const prevStaff = [...staff];
+              const oldStaff = [...staff];
+              const oldPrograms = [...programsRef.current];
+              
               setStaff((p) => p.filter((s) => s.id !== id));
+              
+              // Compute updated programs
+              const updatedPrograms = programsRef.current.map((prog) => ({
+                ...prog,
+                assignments: prog.assignments.filter((a) => a.staffId !== id),
+              }));
+              const changedPrograms = updatedPrograms.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(programsRef.current[i].assignments));
+              
+              programsRef.current = updatedPrograms;
+              setPrograms(updatedPrograms);
+
               try {
                 await db.deleteStaff(id);
-              } catch (e) {
-                setStaff(prevStaff); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to delete staff:", e);
-                return;
-              }
-              db.logAction("DELETE", "STAFF", id, `Deleted staff member`);
-              // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
-              setPrograms((prev) => {
-                const updated = prev.map((prog) => ({
-                  ...prog,
-                  assignments: prog.assignments.filter((a) => a.staffId !== id),
-                }));
-                const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
-                if (supabase && changed.length > 0) {
-                  setTimeout(() => {
-                    db.savePrograms(changed);
-                  }, 0);
+                await db.logAction("DELETE", "STAFF", id, `Deleted staff member`);
+                if (supabase && changedPrograms.length > 0) {
+                  await db.savePrograms(changedPrograms);
                 }
-                return updated;
-              });
+              } catch (err) {
+                console.error("Failed to delete staff, rolling back:", err);
+                setStaff(oldStaff);
+                programsRef.current = oldPrograms;
+                setPrograms(oldPrograms);
+                setNotification("Database error: Failed to delete staff.");
+              }
             }}
-            onClearAll={() => {
+            onClearAll={async () => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
-              db.deleteAllStaff();
+              const oldStaff = [...staff];
+              const oldPrograms = [...programsRef.current];
+
               setStaff([]);
-              db.logAction(
-                "DELETE",
-                "STAFF",
-                "ALL",
-                `Cleared all staff members`,
-              );
-              setPrograms((prev) => {
-                const updated = prev.map((prog) => ({
-                  ...prog,
-                  assignments: [],
-                }));
-                const changed = updated.filter((prog, i) => prev[i].assignments.length > 0);
-                if (supabase && changed.length > 0) {
-                  setTimeout(() => {
-                    db.savePrograms(changed);
-                  }, 0);
+              
+              const updatedPrograms = programsRef.current.map((prog) => ({
+                ...prog,
+                assignments: [],
+              }));
+              const changedPrograms = updatedPrograms.filter((prog, i) => oldPrograms[i].assignments.length > 0);
+              
+              programsRef.current = updatedPrograms;
+              setPrograms(updatedPrograms);
+
+              try {
+                await db.deleteAllStaff();
+                await db.logAction(
+                  "DELETE",
+                  "STAFF",
+                  "ALL",
+                  `Cleared all staff members`,
+                );
+                if (supabase && changedPrograms.length > 0) {
+                  await db.savePrograms(changedPrograms);
                 }
-                return updated;
-              });
+              } catch (err) {
+                console.error("Failed to clear staff, rolling back:", err);
+                setStaff(oldStaff);
+                programsRef.current = oldPrograms;
+                setPrograms(oldPrograms);
+                setNotification("Database error: Failed to clear all staff.");
+              }
             }}
             onOpenScanner={() => {
               setScannerTarget("staff");
@@ -1970,56 +1999,60 @@ const App: React.FC = () => {
                 );
                 return;
               }
+              const oldShifts = [...shifts];
               setShifts((p) => [...p, s]);
               try {
                 await db.upsertShift(s);
-              } catch (e) {
-                setShifts((p) => p.filter((sh) => sh.id !== s.id)); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to add shift:", e);
+                await db.logAction(
+                  "CREATE",
+                  "SHIFT",
+                  s.id,
+                  `Added shift on ${s.pickupDate} ${s.pickupTime}`,
+                );
+              } catch (err) {
+                console.error("Failed to add shift, rolling back:", err);
+                setShifts(oldShifts);
+                setNotification("Database error: Failed to save shift.");
               }
-              db.logAction(
-                "CREATE",
-                "SHIFT",
-                s.id,
-                `Added shift on ${s.pickupDate} ${s.pickupTime}`,
-              );
             }}
             onUpdate={async (s) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
                 return;
               }
-              const prevShifts = [...shifts];
+              const oldShifts = [...shifts];
+              const oldPrograms = [...programsRef.current];
+
               setShifts((p) => p.map((o) => (o.id === s.id ? s : o)));
+              
+              let changedPrograms: DailyProgram[] = [];
+              if (s.isHidden) {
+                const updatedPrograms = programsRef.current.map((prog) => ({
+                  ...prog,
+                  assignments: prog.assignments.filter((a) => a.shiftId !== s.id),
+                }));
+                changedPrograms = updatedPrograms.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(programsRef.current[i].assignments));
+                programsRef.current = updatedPrograms;
+                setPrograms(updatedPrograms);
+              }
+
               try {
                 await db.upsertShift(s);
-              } catch (e) {
-                setShifts(prevShifts); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to update shift:", e);
-              }
-              db.logAction(
-                "UPDATE",
-                "SHIFT",
-                s.id,
-                `Updated shift on ${s.pickupDate} ${s.pickupTime}`,
-              );
-              
-              if (s.isHidden) {
-                setPrograms((prev) => {
-                  const updated = prev.map((prog) => ({
-                    ...prog,
-                    assignments: prog.assignments.filter((a) => a.shiftId !== s.id),
-                  }));
-                  const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
-                  if (supabase && changed.length > 0) {
-                    setTimeout(() => {
-                      db.savePrograms(changed);
-                    }, 0);
-                  }
-                  return updated;
-                });
+                await db.logAction(
+                  "UPDATE",
+                  "SHIFT",
+                  s.id,
+                  `Updated shift on ${s.pickupDate} ${s.pickupTime}`,
+                );
+                if (s.isHidden && changedPrograms.length > 0 && supabase) {
+                  await db.savePrograms(changedPrograms);
+                }
+              } catch (err) {
+                console.error("Failed to update shift, rolling back:", err);
+                setShifts(oldShifts);
+                programsRef.current = oldPrograms;
+                setPrograms(oldPrograms);
+                setNotification("Database error: Failed to update shift.");
               }
             }}
             onBulkUpdate={async (updatedShifts) => {
@@ -2027,7 +2060,7 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
-              const prevShifts = [...shifts];
+              const oldShifts = [...shifts];
               setShifts((p) => {
                 const newShifts = [...p];
                 updatedShifts.forEach(us => {
@@ -2037,11 +2070,12 @@ const App: React.FC = () => {
                 return newShifts;
               });
               try {
+                // Perform bulk DB update
                 await db.upsertShiftsBatch(updatedShifts);
-              } catch (e) {
-                setShifts(prevShifts); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to bulk update shifts:", e);
+              } catch (err) {
+                console.error("Failed to bulk update shifts, rolling back:", err);
+                setShifts(oldShifts);
+                setNotification("Database error: Failed to bulk update shifts.");
               }
             }}
             onDelete={async (id) => {
@@ -2049,33 +2083,38 @@ const App: React.FC = () => {
                 alert("Your account is frozen.");
                 return;
               }
-              const prevShifts = [...shifts];
+              const oldShifts = [...shifts];
+              const oldPrograms = [...programsRef.current];
+
               setShifts((p) => p.filter((s) => s.id !== id));
+              
+              // Compute updated programs
+              const updatedPrograms = programsRef.current.map((prog) => ({
+                ...prog,
+                assignments: prog.assignments.filter((a) => a.shiftId !== id),
+              }));
+              const changedPrograms = updatedPrograms.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(programsRef.current[i].assignments));
+              
+              programsRef.current = updatedPrograms;
+              setPrograms(updatedPrograms);
+
               try {
                 await db.deleteShift(id);
-              } catch (e) {
-                setShifts(prevShifts); // rollback
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to delete shift:", e);
-              }
-              db.logAction("DELETE", "SHIFT", id, `Deleted shift`);
-              // --- IMPROVEMENT 4: GHOST ASSIGNMENTS CLEANUP ---
-              setPrograms((prev) => {
-                const updated = prev.map((prog) => ({
-                  ...prog,
-                  assignments: prog.assignments.filter((a) => a.shiftId !== id),
-                }));
-                const changed = updated.filter((prog, i) => JSON.stringify(prog.assignments) !== JSON.stringify(prev[i].assignments));
-                if (supabase && changed.length > 0) {
-                  setTimeout(() => {
-                    db.savePrograms(changed);
-                  }, 0);
+                await db.logAction("DELETE", "SHIFT", id, `Deleted shift`);
+                if (supabase && changedPrograms.length > 0) {
+                  await db.savePrograms(changedPrograms);
                 }
-                return updated;
-              });
+              } catch (err) {
+                console.error("Failed to delete shift, rolling back:", err);
+                setShifts(oldShifts);
+                programsRef.current = oldPrograms;
+                setPrograms(oldPrograms);
+                setNotification("Database error: Failed to delete shift.");
+              }
             }}
-            onAddFlight={(f) => {
+            onAddFlight={async (f) => {
               if (userProfile && !userProfile.isActive) return;
+              const oldFlights = [...flights];
               const normFNum = normalizeFlightNumber(f.flightNumber);
               const duplicateIdx = flights.findIndex(
                 (existing) =>
@@ -2085,34 +2124,33 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and create the new one?`)) {
-                  const prevFlights = [...flights];
                   const newFlights = [...flights];
                   newFlights.splice(duplicateIdx, 1);
                   setFlights([...newFlights, f]);
                   try {
                     await db.deleteFlight(existing.id);
                     await db.upsertFlight(f);
-                  } catch (e) {
-                    setFlights(prevFlights);
-                    setNotification("Save failed — changes reverted. Check your connection.");
-                    console.warn("Failed to replace flight:", e);
+                    await db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
+                  } catch (err) {
+                    console.error("Failed to add flight, rolling back:", err);
+                    setFlights(oldFlights);
+                    setNotification("Database error: Failed to add flight.");
                   }
-                  db.logAction("UPDATE", "FLIGHT", f.id, `Replaced existing flight ${f.flightNumber}`);
                 }
                 return;
               }
-              const prevFlights2 = [...flights];
               setFlights((p) => [...p, f]);
               try {
                 await db.upsertFlight(f);
-              } catch (e) {
-                setFlights(prevFlights2);
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to add flight:", e);
+              } catch (err) {
+                console.error("Failed to add flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to add flight.");
               }
             }}
             onUpdateFlight={async (f) => {
               if (userProfile && !userProfile.isActive) return;
+              const oldFlights = [...flights];
               const normFNum = normalizeFlightNumber(f.flightNumber);
               const duplicateIdx = flights.findIndex(
                 (existing) =>
@@ -2123,41 +2161,39 @@ const App: React.FC = () => {
               if (duplicateIdx !== -1) {
                 const existing = flights[duplicateIdx];
                 if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
-                   const prevFlights = [...flights];
-                   const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
-                   setFlights([...newFlights, f]);
-                   try {
-                     await db.deleteFlight(existing.id);
-                     await db.upsertFlight(f);
-                   } catch (e) {
-                     setFlights(prevFlights);
-                     setNotification("Save failed — changes reverted. Check your connection.");
-                     console.warn("Failed to update flight:", e);
-                   }
-                   db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
+                    const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
+                    setFlights([...newFlights, f]);
+                    try {
+                      await db.deleteFlight(existing.id);
+                      await db.upsertFlight(f);
+                      await db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
+                    } catch (err) {
+                      console.error("Failed to update flight, rolling back:", err);
+                      setFlights(oldFlights);
+                      setNotification("Database error: Failed to update flight.");
+                    }
                 }
                 return;
               }
-              const prevFlights3 = [...flights];
               setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
               try {
                 await db.upsertFlight(f);
-              } catch (e) {
-                setFlights(prevFlights3);
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to update flight:", e);
+              } catch (err) {
+                console.error("Failed to update flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to update flight.");
               }
             }}
             onDeleteFlight={async (id) => {
               if (userProfile && !userProfile.isActive) return;
-              const prevFlights4 = [...flights];
+              const oldFlights = [...flights];
               setFlights((p) => p.filter((f) => f.id !== id));
               try {
                 await db.deleteFlight(id);
-              } catch (e) {
-                setFlights(prevFlights4);
-                setNotification("Save failed — changes reverted. Check your connection.");
-                console.warn("Failed to delete flight:", e);
+              } catch (err) {
+                console.error("Failed to delete flight, rolling back:", err);
+                setFlights(oldFlights);
+                setNotification("Database error: Failed to delete flight.");
               }
             }}
           />
@@ -2176,69 +2212,98 @@ const App: React.FC = () => {
             stationHealth={stationHealth}
             alerts={alerts}
             minRestHours={minRestHours}
+            getLatestPrograms={() => programsRef.current}
+            getLatestLeaveRequests={() => leaveRequestsRef.current}
             onUpdatePrograms={async (updated, changedDateStrings?: string[]) => {
+              // Backup the old state in case we need to rollback
+              const oldPrograms = [...programsRef.current];
+
               // If changedDateStrings is provided, use it directly
               let changedPrograms = updated;
               if (changedDateStrings && changedDateStrings.length > 0) {
                 changedPrograms = updated.filter(u => changedDateStrings.includes(u.dateString as string));
               } else {
                 changedPrograms = updated.filter(u => {
-                  const prev = programs.find(p => p.dateString === u.dateString);
+                  const prev = oldPrograms.find(p => p.dateString === u.dateString);
                   if (!prev) return true;
                   return JSON.stringify(prev) !== JSON.stringify(u);
                 });
               }
 
-              setPrograms(prev => {
-                const newProgs = prev.map(p => {
-                  if (changedDateStrings && changedDateStrings.length > 0) {
-                    if (changedDateStrings.includes(p.dateString as string)) {
-                      return updated.find(u => u.dateString === p.dateString) || p;
-                    }
-                    return p;
+              const newProgsComputed = programsRef.current.map(p => {
+                if (changedDateStrings && changedDateStrings.length > 0) {
+                  if (changedDateStrings.includes(p.dateString as string)) {
+                    return updated.find(u => u.dateString === p.dateString) || p;
                   }
-                  return updated.find(u => u.dateString === p.dateString) || p;
-                });
-                
-                updated.forEach(u => {
-                  if (!newProgs.find(p => p.dateString === u.dateString)) {
-                    newProgs.push(u);
-                  }
-                });
-                
-                return newProgs.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+                  return p;
+                }
+                return updated.find(u => u.dateString === p.dateString) || p;
               });
+              
+              updated.forEach(u => {
+                if (!newProgsComputed.find(p => p.dateString === u.dateString)) {
+                  newProgsComputed.push(u);
+                }
+              });
+              
+              const sorted = newProgsComputed.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+              
+              // Optimistically update local state & ref
+              programsRef.current = sorted;
+              setPrograms(sorted);
+
               if (supabase && changedPrograms.length > 0) {
                 try {
                   await db.savePrograms(changedPrograms);
-                } catch (e) {
-                  setNotification("Save failed — program not saved. Check your connection.");
-                  console.warn("Failed to save programs:", e);
+                } catch (err) {
+                  console.error("Failed to save programs to database, rolling back.", err);
+                  // Rollback state & ref
+                  programsRef.current = oldPrograms;
+                  setPrograms(oldPrograms);
+                  setNotification("Failed to save roster changes. Connection error.");
                 }
               }
             }}
             onRestoreVersion={async (v) => {
-              setPrograms(prev => {
-                const merged = [...prev];
-                v.programs.forEach(newP => {
-                   const idx = merged.findIndex(p => p.dateString === newP.dateString);
-                   if (idx !== -1) merged[idx] = newP;
-                   else merged.push(newP);
-                });
-                return merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+              const oldPrograms = [...programsRef.current];
+              const merged = [...programsRef.current];
+              v.programs.forEach(newP => {
+                 const idx = merged.findIndex(p => p.dateString === newP.dateString);
+                 if (idx !== -1) merged[idx] = newP;
+                 else merged.push(newP);
               });
+              const sorted = merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+              
+              programsRef.current = sorted;
+              setPrograms(sorted);
               setStartDate(v.periodStart);
               setEndDate(v.periodEnd);
               setStationHealth(v.stationHealth);
               setNotification(`Restored version: ${v.name}`);
               if (supabase) {
-                try { await db.savePrograms(v.programs); } catch (e) { console.warn("Failed to save restored version:", e); }
+                try {
+                  await db.savePrograms(v.programs);
+                } catch (err) {
+                  console.error("Failed to save restored version:", err);
+                  programsRef.current = oldPrograms;
+                  setPrograms(oldPrograms);
+                  setNotification("Failed to restore version on database. Connection error.");
+                }
               }
             }}
             onUpdateLeaves={async (l: LeaveRequest[]) => {
+              const oldLeaves = [...leaveRequestsRef.current];
+              leaveRequestsRef.current = l;
               setLeaveRequests(l);
               if (supabase) {
-                await db.upsertLeaves(l);
+                try {
+                  await db.upsertLeaves(l);
+                } catch (err) {
+                  console.error("Failed to save leave requests, rolling back.", err);
+                  leaveRequestsRef.current = oldLeaves;
+                  setLeaveRequests(oldLeaves);
+                  setNotification("Failed to update leave requests. Connection error.");
+                }
               }
             }}
           />
@@ -2305,8 +2370,8 @@ const App: React.FC = () => {
 
       {/* Mobile Footer Navigation */}
         
-      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[9999] transform-gpu translate-z-0 isolate pb-safe">
-        <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar">
+      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white opacity-100 border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[9999] pointer-events-auto select-none pb-safe">
+        <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar pointer-events-auto">
         {[
           { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
           { id: "flights", icon: Plane, label: "Flights" },

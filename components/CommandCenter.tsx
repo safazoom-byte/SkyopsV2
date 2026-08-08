@@ -1103,34 +1103,6 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
                       />
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">
-                      <h5 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-2">Default Signatures</h5>
-                      <SignatureInput 
-                         label="Prepared By" 
-                         value={myProfile.preparedBy || ""} 
-                         placeholder="e.g. Operation Control Center"
-                         onChange={(val: string) => {
-                             if (val !== myProfile.preparedBy) {
-                                const curr = users.find(u => u.id === currentUser.id) || currentUser;
-                                const updated = { ...curr, preparedBy: val };
-                                handleUpdateUser(updated);
-                             }
-                         }}
-                      />
-                      <div className="mt-2" />
-                      <SignatureInput 
-                         label="Revised By" 
-                         value={myProfile.revisedBy || ""} 
-                         onChange={(val: string) => {
-                             if (val !== myProfile.revisedBy) {
-                                 handleUpdateUser({ ...myProfile, revisedBy: val });
-                             }
-                         }}
-                      />
-                    </div>
-                  </div>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                     <div className="border border-slate-200 p-6 rounded-2xl flex flex-col gap-2">

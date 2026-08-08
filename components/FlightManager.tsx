@@ -374,7 +374,7 @@ export const FlightManager: React.FC<Props> = ({
                 className="space-y-4 md:space-y-8 animate-in slide-in-from-bottom duration-700"
               >
                 <div
-                  className="sticky top-20 md:top-24 z-20 flex items-center justify-between p-4 md:p-6 rounded-xl md:rounded-3xl shadow-xl backdrop-blur-xl border bg-white/90 border-slate-100 text-slate-900"
+                  className="sticky top-20 md:top-24 z-20 flex items-center justify-between p-4 md:p-6 rounded-xl md:rounded-3xl shadow-xl border bg-white opacity-100 border-slate-100 text-slate-900 pointer-events-auto"
                 >
                   <div className="flex items-center gap-3 md:gap-6">
                     <div

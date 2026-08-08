@@ -274,7 +274,7 @@ export const generateAIProgram = async (
     data.shifts
       .filter((s) => s.pickupDate === dStr)
       .forEach((s) => {
-        targetHeadcount += s.maxStaff || s.minStaff;
+        targetHeadcount += s.maxStaff ?? s.minStaff;
       });
 
     let rosterCount = 0;
@@ -682,7 +682,7 @@ export const generateAIProgram = async (
         const currentAssigned = program.assignments.filter(
           (a) => a.shiftId === shift.id,
         ).length;
-        const targetStaff = shift.maxStaff || shift.minStaff;
+        const targetStaff = shift.maxStaff ?? shift.minStaff;
         if (currentAssigned < targetStaff) {
           const available = getAvailableStaff(shift);
           if (available.length > 0) {
@@ -714,7 +714,7 @@ export const generateAIProgram = async (
       (p) => p.dateString === shift.pickupDate,
     );
     if (dayOffset !== -1) {
-      totalRequiredStaff += shift.maxStaff || shift.minStaff;
+      totalRequiredStaff += shift.maxStaff ?? shift.minStaff;
     }
   });
 

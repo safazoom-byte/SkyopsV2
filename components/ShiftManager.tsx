@@ -40,6 +40,7 @@ import {
   PlaneTakeoff,
   Bot,
   Unlock,
+  Check,
 } from "lucide-react";
 
 import { AutoScheduleModal } from "./AutoScheduleModal";
@@ -1295,6 +1296,10 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                           };
                                           delete updated.roleCounts["__ai_scheduled"];
                                           updated.roleCounts["__manual_scheduled"] = 1;
+                                          delete updated.roleCounts["__ai_suggested_pickup"];
+                                          if (!updated.roleCounts["__ai_suggested_end"]) {
+                                            delete updated.roleCounts["__has_ai_suggestions"];
+                                          }
                                           
                                           if (pt > s.endTime) {
                                             const ed = new Date(s.pickupDate);
@@ -1316,6 +1321,34 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                         ) : null}
                                       </div>
                                     </div>
+                                    {s.roleCounts?.["__ai_suggested_pickup"] && (
+                                      <div 
+                                        onClick={() => {
+                                          const aiVal = s.roleCounts?.["__ai_suggested_pickup"] as unknown as string;
+                                          if (aiVal) {
+                                            const updatedRoleCounts = { ...(s.roleCounts || {}) };
+                                            delete updatedRoleCounts["__ai_suggested_pickup"];
+                                            if (!updatedRoleCounts["__ai_suggested_end"]) {
+                                              delete updatedRoleCounts["__has_ai_suggestions"];
+                                              updatedRoleCounts["__ai_scheduled"] = 1;
+                                            }
+                                            onUpdate({
+                                              ...s,
+                                              pickupTime: aiVal,
+                                              roleCounts: updatedRoleCounts
+                                            });
+                                          }
+                                        }}
+                                        className="mt-1 flex items-center justify-between gap-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-1.5 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition-all shadow-sm shrink-0"
+                                        title="Click to approve AI pickup time"
+                                      >
+                                        <span className="flex items-center gap-0.5 whitespace-nowrap">
+                                          <Bot size={10} className="text-indigo-500 shrink-0 animate-bounce" />
+                                          AI: {s.roleCounts["__ai_suggested_pickup"] as any}
+                                        </span>
+                                        <Check size={9} className="text-indigo-600 shrink-0" />
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="px-2 py-2">
                                     <input
@@ -1329,6 +1362,11 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                         });
                                       }}
                                     />
+                                    {s.roleCounts?.["__ai_suggested_end_date"] && (s.roleCounts?.["__ai_suggested_end_date"] as unknown as string) !== s.pickupDate && (
+                                      <div className="mt-1 text-[9px] font-bold text-indigo-500 text-center bg-indigo-50/50 rounded py-0.5 border border-indigo-100">
+                                        AI End: {s.roleCounts["__ai_suggested_end_date"] as any}
+                                      </div>
+                                    )}
                                   </td>
                                   <td className="px-2 py-2">
                                     <div className="relative group">
@@ -1345,6 +1383,11 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                           };
                                           delete updated.roleCounts["__ai_scheduled"];
                                           updated.roleCounts["__manual_scheduled"] = 1;
+                                          delete updated.roleCounts["__ai_suggested_end"];
+                                          delete updated.roleCounts["__ai_suggested_end_date"];
+                                          if (!updated.roleCounts["__ai_suggested_pickup"]) {
+                                            delete updated.roleCounts["__has_ai_suggestions"];
+                                          }
 
                                           if (s.pickupTime > et) {
                                             const ed = new Date(s.pickupDate);
@@ -1366,8 +1409,42 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
                                         ) : null}
                                       </div>
                                     </div>
-                                    <div className="text-[9px] font-bold text-slate-400 mt-1 text-center bg-slate-100 rounded">
-                                      {calculateShiftDuration(s)}
+                                    {s.roleCounts?.["__ai_suggested_end"] && (
+                                      <div 
+                                        onClick={() => {
+                                          const aiVal = s.roleCounts?.["__ai_suggested_end"] as unknown as string;
+                                          const aiEndDate = (s.roleCounts?.["__ai_suggested_end_date"] as unknown as string) || s.pickupDate;
+                                          if (aiVal) {
+                                            const updatedRoleCounts = { ...(s.roleCounts || {}) };
+                                            delete updatedRoleCounts["__ai_suggested_end"];
+                                            delete updatedRoleCounts["__ai_suggested_end_date"];
+                                            if (!updatedRoleCounts["__ai_suggested_pickup"]) {
+                                              delete updatedRoleCounts["__has_ai_suggestions"];
+                                              updatedRoleCounts["__ai_scheduled"] = 1;
+                                            }
+                                            onUpdate({
+                                              ...s,
+                                              endTime: aiVal,
+                                              endDate: aiEndDate,
+                                              roleCounts: updatedRoleCounts
+                                            });
+                                          }
+                                        }}
+                                        className="mt-1 flex items-center justify-between gap-1 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-1.5 py-1 rounded-lg text-[9px] font-bold cursor-pointer transition-all shadow-sm shrink-0"
+                                        title="Click to approve AI release time"
+                                      >
+                                        <span className="flex items-center gap-0.5 whitespace-nowrap">
+                                          <Bot size={10} className="text-indigo-500 shrink-0 animate-bounce" />
+                                          AI: {s.roleCounts["__ai_suggested_end"] as any}
+                                        </span>
+                                        <Check size={9} className="text-indigo-600 shrink-0" />
+                                      </div>
+                                    )}
+                                    <div className="mt-2 flex items-center justify-center">
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm" title="Shift duration">
+                                        <Clock size={10} className="text-indigo-400 shrink-0" />
+                                        Shift Duration: {calculateShiftDuration(s)}
+                                      </span>
                                     </div>
                                   </td>
                                   <td className="px-2 py-2 text-center whitespace-nowrap">

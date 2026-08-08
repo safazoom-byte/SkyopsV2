@@ -856,7 +856,7 @@ export const StaffManager: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20">
+      <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 bg-white opacity-100 p-4 rounded-3xl border border-slate-100 shadow-sm sticky top-24 z-20 pointer-events-auto">
         <div className="flex items-center flex-1 bg-slate-50 rounded-2xl px-4 py-2 border border-slate-100">
           <Search className="text-slate-400 mr-3" size={20} />
           <input

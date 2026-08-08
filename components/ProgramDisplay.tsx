@@ -43,6 +43,7 @@ import {
   MessageSquare,
   X,
   Edit3,
+  Settings,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -63,6 +64,8 @@ interface Props {
   onUpdatePrograms: (p: DailyProgram[], changedDates?: string[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
   onUpdateLeaves?: (l: LeaveRequest[]) => void;
+  getLatestPrograms?: () => DailyProgram[];
+  getLatestLeaveRequests?: () => LeaveRequest[];
 }
 
 export const ProgramDisplay: React.FC<Props> = ({
@@ -80,6 +83,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   onUpdatePrograms,
   onRestoreVersion,
   onUpdateLeaves,
+  getLatestPrograms,
+  getLatestLeaveRequests,
 }) => {
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [isGeneratingStaffPdf, setIsGeneratingStaffPdf] = useState(false);
@@ -93,6 +98,193 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(programs);
+
+  const [periodPreparedBy, setPeriodPreparedBy] = useState("");
+  const [periodRevisedBy, setPeriodRevisedBy] = useState("");
+  const [minOffDayHours, setMinOffDayHours] = useState(23);
+  const [maxOffDayHours, setMaxOffDayHours] = useState(27);
+  const [hideDriversOffDuty, setHideDriversOffDuty] = useState(false);
+  const [hideLabourOffDuty, setHideLabourOffDuty] = useState(false);
+  const [hideSecurityOffDuty, setHideSecurityOffDuty] = useState(false);
+  const [hideAccountantsOffDuty, setHideAccountantsOffDuty] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [userProfile, setUserProfile] = useState<any>(null);
+
+  // Temporary state for the modal form inputs
+  const [tempPrep, setTempPrep] = useState("");
+  const [tempRev, setTempRev] = useState("");
+  const [tempMinOff, setTempMinOff] = useState("23");
+  const [tempMaxOff, setTempMaxOff] = useState("27");
+  const [tempDefaultPrep, setTempDefaultPrep] = useState("");
+  const [tempDefaultRev, setTempDefaultRev] = useState("");
+  const [tempHideDrivers, setTempHideDrivers] = useState(false);
+  const [tempHideLabour, setTempHideLabour] = useState(false);
+  const [tempHideSecurity, setTempHideSecurity] = useState(false);
+  const [tempHideAccountants, setTempHideAccountants] = useState(false);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        if (supabase) {
+          const prof = await db.getUserProfile(true);
+          setUserProfile(prof);
+        }
+      } catch (err) {
+        console.error("Error fetching user profile:", err);
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  useEffect(() => {
+    const keyPrefix = `${startDate}_${endDate}`;
+    const savedPrep = localStorage.getItem(`prep_${keyPrefix}`);
+    const savedRev = localStorage.getItem(`rev_${keyPrefix}`);
+    const savedMin = localStorage.getItem(`minOffDay_${keyPrefix}`);
+    const savedMax = localStorage.getItem(`maxOffDay_${keyPrefix}`);
+    
+    const savedHideDrivers = localStorage.getItem("hideDrivers_global") === "true";
+    const savedHideLabour = localStorage.getItem("hideLabour_global") === "true";
+    const savedHideSecurity = localStorage.getItem("hideSecurity_global") === "true";
+    const savedHideAccountants = localStorage.getItem("hideAccountants_global") === "true";
+
+    const dbSettings = programs.find((p) => p.periodSettings !== undefined)?.periodSettings;
+
+    let activePrep = "";
+    let activeRev = "";
+    let activeMin = 23;
+    let activeMax = 27;
+
+    if (dbSettings) {
+      activePrep = dbSettings.preparedBy !== undefined ? dbSettings.preparedBy : (userProfile?.preparedBy || "");
+      activeRev = dbSettings.revisedBy !== undefined ? dbSettings.revisedBy : (userProfile?.revisedBy || "");
+      activeMin = dbSettings.minOffDayHours !== undefined ? dbSettings.minOffDayHours : 23;
+      activeMax = dbSettings.maxOffDayHours !== undefined ? dbSettings.maxOffDayHours : 27;
+    } else {
+      if (savedPrep !== null) {
+        activePrep = savedPrep;
+      } else {
+        activePrep = userProfile?.preparedBy || "";
+      }
+
+      if (savedRev !== null) {
+        activeRev = savedRev;
+      } else {
+        activeRev = userProfile?.revisedBy || "";
+      }
+
+      if (savedMin !== null) {
+        activeMin = Number(savedMin);
+      } else {
+        activeMin = 23;
+      }
+
+      if (savedMax !== null) {
+        activeMax = Number(savedMax);
+      } else {
+        activeMax = 27;
+      }
+    }
+
+    setPeriodPreparedBy(activePrep);
+    setPeriodRevisedBy(activeRev);
+    setMinOffDayHours(activeMin);
+    setMaxOffDayHours(activeMax);
+    setHideDriversOffDuty(savedHideDrivers);
+    setHideLabourOffDuty(savedHideLabour);
+    setHideSecurityOffDuty(savedHideSecurity);
+    setHideAccountantsOffDuty(savedHideAccountants);
+
+    setTempPrep(activePrep);
+    setTempRev(activeRev);
+    setTempMinOff(activeMin.toString());
+    setTempMaxOff(activeMax.toString());
+    setTempDefaultPrep(userProfile?.preparedBy || "");
+    setTempDefaultRev(userProfile?.revisedBy || "");
+    setTempHideDrivers(savedHideDrivers);
+    setTempHideLabour(savedHideLabour);
+    setTempHideSecurity(savedHideSecurity);
+    setTempHideAccountants(savedHideAccountants);
+  }, [startDate, endDate, userProfile, programs]);
+
+  const handleSaveSettings = async (
+    prep: string,
+    rev: string,
+    minH: number,
+    maxH: number,
+    defaultPrepVal?: string,
+    defaultRevVal?: string
+  ) => {
+    const keyPrefix = `${startDate}_${endDate}`;
+    localStorage.setItem(`prep_${keyPrefix}`, prep);
+    localStorage.setItem(`rev_${keyPrefix}`, rev);
+    localStorage.setItem(`minOffDay_${keyPrefix}`, minH.toString());
+    localStorage.setItem(`maxOffDay_${keyPrefix}`, maxH.toString());
+    localStorage.setItem("hideDrivers_global", tempHideDrivers.toString());
+    localStorage.setItem("hideLabour_global", tempHideLabour.toString());
+    localStorage.setItem("hideSecurity_global", tempHideSecurity.toString());
+    localStorage.setItem("hideAccountants_global", tempHideAccountants.toString());
+    
+    setPeriodPreparedBy(prep);
+    setPeriodRevisedBy(rev);
+    setMinOffDayHours(minH);
+    setMaxOffDayHours(maxH);
+    setHideDriversOffDuty(tempHideDrivers);
+    setHideLabourOffDuty(tempHideLabour);
+    setHideSecurityOffDuty(tempHideSecurity);
+    setHideAccountantsOffDuty(tempHideAccountants);
+
+    // 1. Update default signatures in the user profiles database table
+    if (userProfile && (defaultPrepVal !== undefined || defaultRevVal !== undefined)) {
+      const updatedProfile = {
+        ...userProfile,
+        preparedBy: defaultPrepVal !== undefined ? defaultPrepVal : userProfile.preparedBy,
+        revisedBy: defaultRevVal !== undefined ? defaultRevVal : userProfile.revisedBy,
+      };
+      try {
+        await db.updateUserProfile(updatedProfile);
+        setUserProfile(updatedProfile);
+      } catch (err) {
+        console.error("Error updating default signatures in DB profile:", err);
+      }
+    }
+
+    // 2. Update period-specific settings in the programs database table
+    const updatedPrograms = programs.map((p) => {
+      if (p.dateString && p.dateString >= startDate && p.dateString <= endDate) {
+        return {
+          ...p,
+          periodSettings: {
+            preparedBy: prep,
+            revisedBy: rev,
+            minOffDayHours: minH,
+            maxOffDayHours: maxH,
+            hideDriversOffDuty: tempHideDrivers,
+            hideLabourOffDuty: tempHideLabour,
+            hideSecurityOffDuty: tempHideSecurity,
+            hideAccountantsOffDuty: tempHideAccountants,
+          },
+        };
+      }
+      return p;
+    });
+
+    try {
+      await onUpdatePrograms(updatedPrograms);
+    } catch (err) {
+      console.error("Error saving program-period settings to DB:", err);
+    }
+
+    setShowSettingsModal(false);
+  };
+
+  const isOffDutyVisible = (s: Staff) => {
+    if (hideDriversOffDuty && s.isDriver) return false;
+    if (hideLabourOffDuty && s.isLabour) return false;
+    if (hideSecurityOffDuty && s.isSecurity) return false;
+    if (hideAccountantsOffDuty && s.isAccountant) return false;
+    return true;
+  };
 
   useEffect(() => {
     if (referencePrograms.length === 0 && programs.length > 0) {
@@ -301,11 +493,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
   };
 
-  const getShiftHours = (shiftId: string) => {
+  const getShiftHours = (shiftId: string, assign?: any) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
-    const [ph, pm] = shift.pickupTime.split(":").map(Number);
-    const [sh, sm] = shift.endTime.split(":").map(Number);
+    const startStr = assign?.customStartTime || shift.pickupTime;
+    const endStr = assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime;
+    const [ph, pm] = startStr.split(":").map(Number);
+    const [sh, sm] = endStr.split(":").map(Number);
     let hours = sh - ph + (sm - pm) / 60;
     if (sh < ph) hours += 24;
     return hours;
@@ -315,7 +509,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     return activePrograms.reduce((acc, p) => {
       const assign = p.assignments.find((a) => a.staffId === staffId);
       if (assign) {
-        return acc + getShiftHours(assign.shiftId || "");
+        return acc + getShiftHours(assign.shiftId || "", assign);
       }
       return acc;
     }, 0);
@@ -393,12 +587,12 @@ export const ProgramDisplay: React.FC<Props> = ({
   }, [incomingDuties]);
 
   const assignmentsByStaff = React.useMemo(() => {
-    const map: Record<string, { shiftId: string; dateString: string }[]> = {};
+    const map: Record<string, (DailyProgram['assignments'][number] & { dateString: string })[]> = {};
     programs.forEach(p => {
       const pDate = p.dateString || startDate;
       p.assignments.forEach(a => {
         if (!map[a.staffId]) map[a.staffId] = [];
-        map[a.staffId].push({ shiftId: a.shiftId || "", dateString: pDate });
+        map[a.staffId].push({ ...a, dateString: pDate });
       });
     });
     return map;
@@ -426,10 +620,12 @@ export const ProgramDisplay: React.FC<Props> = ({
 
     const assigns = assignmentsByStaff[staffId] || [];
     assigns.forEach((a) => {
-      const s = getShift(a.shiftId);
+      const s = getShift(a.shiftId || "");
       if (s) {
-        const [sh, sm] = s.endTime.split(":").map(Number);
-        const [ph, pm] = s.pickupTime.split(":").map(Number);
+        const startStr = a.customStartTime || s.pickupTime;
+        const endStr = a.isExtension && a.releaseTime ? a.releaseTime : s.endTime;
+        const [ph, pm] = startStr.split(":").map(Number);
+        const [sh, sm] = endStr.split(":").map(Number);
         const startDt = new Date(`${a.dateString}T12:00:00Z`);
         startDt.setHours(ph, pm, 0, 0);
         const endDt = new Date(`${a.dateString}T12:00:00Z`);
@@ -579,7 +775,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
 
       const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
+      const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!) && isOffDutyVisible(s));
       const pdfCategories: Record<string, string[]> = {
         "DAYS OFF": [],
         "ROSTER LEAVE": [],
@@ -666,7 +862,16 @@ export const ProgramDisplay: React.FC<Props> = ({
           .map((a) => {
             const st = getStaff(a.staffId);
             if (!st) return "";
-            return st.initials;
+            let label = st.initials;
+            if (a.customStartTime) {
+              label = `${st.initials} from(${a.customStartTime})`;
+              if (a.note) {
+                label = `${st.initials} (${a.note}) from(${a.customStartTime})`;
+              }
+            } else if (a.note) {
+              label = `${st.initials} (${a.note})`;
+            }
+            return label;
           })
           .join("-");
 
@@ -976,16 +1181,19 @@ export const ProgramDisplay: React.FC<Props> = ({
           const shift = getShift(assign.shiftId || "");
           if (shift) {
             const pDate = new Date(`${p.dateString!}T12:00:00Z`);
-            const [ph, pm] = shift.pickupTime.split(":").map(Number);
+            const [ph, pm] = (assign.customStartTime || shift.pickupTime).split(":").map(Number);
             const shiftStart = new Date(pDate);
             shiftStart.setHours(ph, pm, 0, 0);
             const rest = calculateRestHours(s.id, shiftStart);
             const restWarning = rest !== null && rest < minRestHours;
-            const restLabel = rest !== null ? `[${rest.toFixed(1)}H]` : "";
+            const duration = `${getShiftHours(assign.shiftId || "", assign).toFixed(1)}H`;
+            const restLabel = rest !== null ? ` [${rest.toFixed(1)}H]` : "";
+            const displayTime = assign.customStartTime || shift.pickupTime;
+            const cellText = `${duration}\n${displayTime}${restLabel}`;
             if (restWarning) {
-              row.push({ content: `${shift.pickupTime} ${restLabel}`, styles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: "bold" } });
+              row.push({ content: cellText, styles: { fillColor: [239, 68, 68], textColor: [255, 255, 255], fontStyle: "bold" } });
             } else {
-              row.push(`${shift.pickupTime} ${restLabel}`);
+              row.push(cellText);
             }
           } else {
             row.push("-");
@@ -1304,7 +1512,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         }
       });
       
-      const profile = await db.getUserProfile();
+      const profile = await db.getUserProfile(true);
       
       sheet.columns = [
         { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 },
@@ -1320,20 +1528,26 @@ export const ProgramDisplay: React.FC<Props> = ({
       titleCell.font = { name: 'Arial', size: 15, bold: true };
       titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      if (profile?.companyLogo) {
-        const base64Data = profile.companyLogo.split(';base64,')[1];
-        const extMatch = profile.companyLogo.match(/image\/(jpeg|png)/);
-        const extension = extMatch ? extMatch[1] : 'png';
-        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
-        sheet.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      if (profile?.companyLogo && profile.companyLogo.includes(';base64,')) {
+        const parts = profile.companyLogo.split(';base64,');
+        if (parts.length > 1) {
+          const base64Data = parts[1];
+          const extMatch = profile.companyLogo.match(/image\/(jpeg|png|jpg|webp)/);
+          const extension = extMatch ? extMatch[1] : 'png';
+          const imgId = workbook.addImage({ base64: base64Data, extension: (extension === 'jpg' ? 'jpeg' : extension) as any });
+          sheet.addImage(imgId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+        }
       }
       
-      if (profile?.skyopsLogo) {
-        const base64Data = profile.skyopsLogo.split(';base64,')[1];
-        const extMatch = profile.skyopsLogo.match(/image\/(jpeg|png)/);
-        const extension = extMatch ? extMatch[1] : 'png';
-        const imgId = workbook.addImage({ base64: base64Data, extension: extension as any });
-        sheet.addImage(imgId, { tl: { col: 7.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+      if (profile?.skyopsLogo && profile.skyopsLogo.includes(';base64,')) {
+        const parts = profile.skyopsLogo.split(';base64,');
+        if (parts.length > 1) {
+          const base64Data = parts[1];
+          const extMatch = profile.skyopsLogo.match(/image\/(jpeg|png|jpg|webp)/);
+          const extension = extMatch ? extMatch[1] : 'png';
+          const imgId = workbook.addImage({ base64: base64Data, extension: (extension === 'jpg' ? 'jpeg' : extension) as any });
+          sheet.addImage(imgId, { tl: { col: 7.1, row: 0.1 }, ext: { width: 60, height: 45 } });
+        }
       }
 
       const headers = ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
@@ -1368,7 +1582,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!) && isOffDutyVisible(s));
 
         offStaff.forEach(s => {
           const leave = hasLeaveOnDate(s.id, prog.dateString!);
@@ -1436,7 +1650,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                  );
                  const isAnyExtended = a.isExtension || isOriginalShiftOfExtension;
 
-                 if (a.note) {
+                 if (a.customStartTime) {
+                   label = `${s.initials} from(${a.customStartTime})`;
+                   if (a.note) {
+                     label = `${s.initials} (${a.note}) from(${a.customStartTime})`;
+                   }
+                 } else if (a.note) {
                    label = `${s.initials} (${a.note})`;
                  }
                  staffTokens.push({ text: label, type, hasNote: !!a.note, isExtension: !!isAnyExtended });
@@ -1709,8 +1928,8 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
       
       sheet.addRow([]);
-      const fRow1 = sheet.addRow(["Prepared By: " + (profile?.preparedBy || "")]);
-      const fRow2 = sheet.addRow(["Revised By: " + (profile?.revisedBy || "")]);
+      const fRow1 = sheet.addRow(["Prepared By: " + (periodPreparedBy || profile?.preparedBy || "")]);
+      const fRow2 = sheet.addRow(["Revised By: " + (periodRevisedBy || profile?.revisedBy || "")]);
       
       fRow1.getCell(1).font = { bold: true, size: 10 };
       fRow2.getCell(1).font = { bold: true, size: 10 };
@@ -1840,7 +2059,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         };
 
         const workingIds = new Set(prog.assignments.map((a) => a.staffId));
-        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!));
+        const offStaff = activeStaff.filter((s) => !workingIds.has(s.id) && isStaffActiveOnDate(s, prog.dateString!) && isOffDutyVisible(s));
 
         offStaff.forEach((s) => {
           const leave = leaveMapByStaff[s.id]?.find(
@@ -1913,7 +2132,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                  else if (s.isDriver) type = "driver";
                  
                  let label = s.initials;
-                 if (a.note) {
+                 if (a.customStartTime) {
+                   label = `${s.initials} from(${a.customStartTime})`;
+                   if (a.note) {
+                     label = `${s.initials} (${a.note}) from(${a.customStartTime})`;
+                   }
+                 } else if (a.note) {
                    label = `${s.initials} (${a.note})`;
                  }
                  
@@ -2242,7 +2466,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       return;
     }
     
-    const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
+    const maxSort = Math.max(0, ...prog.assignments.map((a: any) => a.manualSortIndex || 0));
     prog.assignments.push({
       id: crypto.randomUUID(),
       staffId,
@@ -2272,42 +2496,47 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetShiftId: string,
     targetDate: string,
   ) => {
-    if (date !== targetDate) return;
-    const newPrograms = [...programs];
-    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
-    if (progIndex === -1) return;
+    const latestPrograms = getLatestPrograms ? getLatestPrograms() : programs;
+    const newPrograms = [...latestPrograms];
+    const sourceProgIndex = newPrograms.findIndex((p) => p.dateString === date);
+    const targetProgIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
+    if (sourceProgIndex === -1 || targetProgIndex === -1) return;
     
-    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
-    newPrograms[progIndex] = prog;
+    const sourceProg = { ...newPrograms[sourceProgIndex], assignments: [...newPrograms[sourceProgIndex].assignments] };
+    newPrograms[sourceProgIndex] = sourceProg;
+    
+    let targetProg = sourceProg;
+    if (sourceProgIndex !== targetProgIndex) {
+        targetProg = { ...newPrograms[targetProgIndex], assignments: [...newPrograms[targetProgIndex].assignments] };
+        newPrograms[targetProgIndex] = targetProg;
+    }
 
     const isTargetAbsence = targetShiftId.startsWith("ABSENCE");
-    let currentLeaves = [...leaveRequests];
+    const latestLeaves = getLatestLeaveRequests ? getLatestLeaveRequests() : leaveRequests;
+    let currentLeaves = [...latestLeaves];
     let leavesChanged = false;
     let programsChanged = false;
 
     if (!currentShiftId.startsWith("ABSENCE")) {
-      const staffObj = activeStaff.find((s) => s.id === staffId);
-      const isDriver = staffObj?.isDriver;
-
       // If dropped onto the same shift it was already in, move to front
-      if (currentShiftId === targetShiftId) {
-        const oldIdx = prog.assignments.findIndex(
+      if (currentShiftId === targetShiftId && date === targetDate) {
+        const oldIdx = sourceProg.assignments.findIndex(
           (a) => a.staffId === staffId && a.shiftId === currentShiftId,
         );
         if (oldIdx !== -1) {
-          const shiftAssignments = prog.assignments.filter(a => a.shiftId === currentShiftId);
+          const shiftAssignments = sourceProg.assignments.filter(a => a.shiftId === currentShiftId);
           const minSort = Math.min(0, ...shiftAssignments.map(a => a.manualSortIndex || 0));
-          prog.assignments[oldIdx].manualSortIndex = minSort - 1;
-          onUpdatePrograms(newPrograms, [targetDate]);
+          sourceProg.assignments[oldIdx] = { ...sourceProg.assignments[oldIdx], manualSortIndex: minSort - 1 };
+          onUpdatePrograms(newPrograms, [date]);
         }
         return;
       }
 
-      const oldIdx = prog.assignments.findIndex(
+      const oldIdx = sourceProg.assignments.findIndex(
         (a) => a.staffId === staffId && a.shiftId === currentShiftId,
       );
       if (oldIdx !== -1) {
-        prog.assignments.splice(oldIdx, 1);
+        sourceProg.assignments.splice(oldIdx, 1);
         programsChanged = true;
       }
     } else if (currentShiftId.startsWith("ABSENCE_") && targetShiftId !== currentShiftId) {
@@ -2323,7 +2552,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     }
     
     if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
-      const exists = prog.assignments.some(
+      const exists = targetProg.assignments.some(
         (a) => a.staffId === staffId && a.shiftId === targetShiftId,
       );
       if (!exists) {
@@ -2339,8 +2568,8 @@ export const ProgramDisplay: React.FC<Props> = ({
           else if (staffObj.isDriver) assignedRole = "DRV";
           else if (staffObj.isOps) assignedRole = "OPS";
         }
-        const maxSort = Math.max(0, ...prog.assignments.map(a => a.manualSortIndex || 0));
-        prog.assignments.push({
+        const maxSort = Math.max(0, ...targetProg.assignments.map(a => a.manualSortIndex || 0));
+        targetProg.assignments.push({
           id: crypto.randomUUID(),
           staffId,
           shiftId: targetShiftId,
@@ -2387,7 +2616,8 @@ export const ProgramDisplay: React.FC<Props> = ({
         onUpdateLeaves(currentLeaves);
     }
     if (programsChanged) {
-        onUpdatePrograms(newPrograms, [targetDate]);
+        const changedDates = date === targetDate ? [targetDate] : [date, targetDate];
+        onUpdatePrograms(newPrograms, changedDates);
     }
   };
 
@@ -2486,11 +2716,34 @@ export const ProgramDisplay: React.FC<Props> = ({
     return staffStats[staffId]?.daysWorked || 0;
   };
 
+  const hasDayOffBefore = (staffId: string, currentDateString: string): boolean => {
+    const d = new Date(`${currentDateString}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - 1);
+    const prevDateString = d.toISOString().split("T")[0];
+    
+    const prevProg = activePrograms.find(p => p.dateString === prevDateString);
+    if (!prevProg) {
+      return false;
+    }
+    
+    const workedPrevDay = prevProg.assignments.some(a => {
+      const ts = getShift(a.shiftId || "");
+      return a.staffId === staffId && ts && !ts.isHidden;
+    });
+    
+    return !workedPrevDay;
+  };
+
   const getStaffColor = (
     s: Staff,
     daysWorked: number,
     restHours: number | null,
+    isDayOffWarning: boolean = false,
   ) => {
+    if (isDayOffWarning) {
+      return "bg-slate-200 border-slate-300 text-slate-800 hover:bg-slate-300 shadow-sm";
+    }
+
     if (restHours !== null && restHours < minRestHours) {
       return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
@@ -2621,27 +2874,35 @@ export const ProgramDisplay: React.FC<Props> = ({
                       const shift = getShift(assign.shiftId || "");
                       if (shift) {
                         const pDate = new Date(`${p.dateString!}T12:00:00Z`);
-                        const [ph, pm] = shift.pickupTime
+                        const [ph, pm] = (assign.customStartTime || shift.pickupTime)
                           .split(":")
                           .map(Number);
                         const shiftStart = new Date(pDate);
                         shiftStart.setHours(ph, pm, 0, 0);
                         const rest = calculateRestHours(s.id, shiftStart);
-                        const restWarning =
-                          rest !== null && rest < minRestHours;
+                        const isDayOffPrev = hasDayOffBefore(s.id, p.dateString!);
+                        const restWarning = isDayOffPrev
+                          ? (rest !== null && rest < minOffDayHours)
+                          : (rest !== null && rest < minRestHours);
+                        const dayOffRestWarning = isDayOffPrev && rest !== null && rest >= minOffDayHours && rest <= maxOffDayHours;
                         if (restWarning) {
                           cellClass += " !bg-red-500 !text-white !border-red-600 shadow-inner";
+                        } else if (dayOffRestWarning) {
+                          cellClass += " !bg-slate-300 !text-slate-800 !border-slate-400 shadow-inner";
                         }
                         content = (
                           <div className="flex flex-col items-center gap-1">
+                            <span className={`text-[9px] font-bold opacity-85 ${restWarning ? "text-white/90" : dayOffRestWarning ? "text-slate-700" : "text-slate-500"}`}>
+                              {getShiftHours(assign.shiftId || "", assign).toFixed(1)}H
+                            </span>
                             <span
-                              className={`font-bold ${restWarning ? "text-white" : "text-slate-900"}`}
+                              className={`font-bold ${restWarning ? "text-white" : dayOffRestWarning ? "text-slate-800" : "text-slate-900"}`}
                             >
-                              {shift.pickupTime}
+                              {assign.customStartTime || shift.pickupTime}
                             </span>
                             {rest !== null && (
                               <span
-                                className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${restWarning ? "bg-rose-500 text-white" : "text-slate-500 bg-slate-100"}`}
+                                className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${restWarning ? "bg-rose-500 text-white" : dayOffRestWarning ? "bg-slate-500 text-white" : "text-slate-500 bg-slate-100"}`}
                               >
                                 {rest.toFixed(1)}H
                               </span>
@@ -3102,16 +3363,20 @@ export const ProgramDisplay: React.FC<Props> = ({
             <span className="hidden md:inline">Internal PDF</span>
           </button>
           <button
-            onClick={generateStaffPdfReport}
-            disabled={isGeneratingStaffPdf || activePrograms.length === 0}
-            className="px-4 md:px-8 py-4 md:py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
+            onClick={() => {
+              setTempPrep(periodPreparedBy);
+              setTempRev(periodRevisedBy);
+              setTempMinOff(minOffDayHours.toString());
+              setTempMaxOff(maxOffDayHours.toString());
+              setTempDefaultPrep(userProfile?.preparedBy || "");
+              setTempDefaultRev(userProfile?.revisedBy || "");
+              setShowSettingsModal(true);
+            }}
+            className="px-4 md:px-8 py-4 md:py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95"
+            title="Program & Off-Day Settings"
           >
-            {isGeneratingStaffPdf ? (
-              <Printer size={18} className="animate-spin" />
-            ) : (
-              <FileDown size={18} />
-            )}
-            <span>Staff PDF</span>
+            <Settings size={18} />
+            <span>Settings</span>
           </button>
           <button
             onClick={generateStaffExcelReport}
@@ -3610,7 +3875,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             const pDate = new Date(
                                               prog.dateString!,
                                             );
-                                            const [ph, pm] = shift.pickupTime
+                                            const [ph, pm] = (a.customStartTime || shift.pickupTime)
                                               .split(":")
                                               .map(Number);
                                             const shiftStart = new Date(pDate);
@@ -3623,20 +3888,25 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             const daysWorked = getStaffWorkload(
                                               st.id,
                                             );
+                                            const isDayOffPrev = hasDayOffBefore(st.id, prog.dateString!);
+                                            const restWarning = isDayOffPrev
+                                              ? (rest !== null && rest < minOffDayHours)
+                                              : (rest !== null && rest < minRestHours);
+                                            const dayOffRestWarning = isDayOffPrev && rest !== null && rest >= minOffDayHours && rest <= maxOffDayHours;
                                             const colorClassBase = getStaffColor(
                                               st,
                                               daysWorked,
-                                              rest,
+                                              rest, dayOffRestWarning,
                                             );
                                             const colorClass = a.isExtension
                                               ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
                                               : colorClassBase;
                                             
-                                            let extText = st.initials;
+                                            let extText = a.customStartTime ? `${st.initials} from(${a.customStartTime})` : st.initials;
                                             if (a.isExtension && a.initialShiftId) {
                                               const initShift = shifts.find(s => s.id === a.initialShiftId);
                                               if (initShift) {
-                                                let start = initShift.pickupTime;
+                                                let start = a.customStartTime || initShift.pickupTime;
                                                 let end = a.releaseTime || shift.endTime;
                                                 if (end.localeCompare(start) < 0) end += "+1";
                                                 extText = `${st.initials} (${start}-${end})`;
@@ -3795,11 +4065,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                   />
                                                 ) : null}
                                                 {rest !== null &&
-                                                  rest < minRestHours && !a.isExtension && (
+                                                  restWarning && !a.isExtension && (
                                                     <span className="ml-1 px-1 bg-white text-orange-600 rounded text-[8px]">
                                                       {rest}H
                                                     </span>
                                                   )}
+                                                {dayOffRestWarning && !restWarning && !a.isExtension && (
+                                                  <span className="ml-1 px-1 bg-slate-500 text-white rounded text-[8px] font-bold">
+                                                    {rest}H
+                                                  </span>
+                                                )}
                                                 {showDays && (
                                                   <span className="ml-1 px-1 bg-black/20 rounded text-[8px]">
                                                     {daysWorked}
@@ -3821,28 +4096,6 @@ export const ProgramDisplay: React.FC<Props> = ({
                                         </div>
 
                                         <div className="mt-1 flex gap-1">
-                                          {/* Driver Selection */}
-                                          {staff.filter(s => s.isDriver).length > 0 && (
-                                              <select
-                                                  value={prog.shiftDrivers?.[shift.id] || ""}
-                                                  onChange={(e) => handleUpdateDriver(prog.dateString!, shift.id, e.target.value)}
-                                                  onClick={(e) => e.stopPropagation()}
-                                                  className={`flex-1 min-w-0 text-[9px] p-1 border rounded outline-none cursor-pointer text-center font-bold ${
-                                                      prog.shiftDrivers?.[shift.id]
-                                                          ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                                                          : "bg-slate-50 text-slate-400 border-slate-200 border-dashed hover:border-indigo-300 hover:text-indigo-600"
-                                                  }`}
-                                                  title="Driver"
-                                              >
-                                                  <option value="">{prog.shiftDrivers?.[shift.id] ? "No Drv" : "+ Drv"}</option>
-                                                  {staff.filter(s => s.isDriver).map(driver => (
-                                                      <option key={driver.id} value={driver.id}>
-                                                          {driver.initials}
-                                                      </option>
-                                                  ))}
-                                              </select>
-                                          )}
-
                                           {/* Note Button */}
                                           <button 
                                               onClick={(e) => {
@@ -4090,6 +4343,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             null,
                                           );
                                           const isLocked = !unlockAbsences && (item as any).isLeave;
+                                          const isHiddenRole = !isOffDutyVisible(s);
                                           const _dummy =
                                             !unlockAbsences && (
                                               cat === "ROSTER LEAVE" ||
@@ -4134,7 +4388,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                                     "AGT"
                                                   );
                                                 }}
-                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
+                                                className={`px-2 py-1 border rounded shadow-sm text-[10px] font-bold uppercase transition-all flex items-center gap-1 group ${colorClass} ${isHiddenRole ? "opacity-30 saturate-50 border-dashed hover:opacity-100" : ""} ${staffActionModal?.staffId === s.id && staffActionModal?.currentShiftId === ("ABSENCE_" + cat) && staffActionModal?.date === prog.dateString ? "ring-2 ring-offset-1 ring-indigo-600 scale-105" : ""} ${isLocked ? "opacity-80 cursor-not-allowed border-slate-200 text-slate-500" : "cursor-move hover:scale-105"}`}
                                               >
                                                 <span>{s.initials}</span>
                                                 {isLocked ? (
@@ -4438,27 +4692,51 @@ export const ProgramDisplay: React.FC<Props> = ({
                 </div>
 
                 {!staffActionModal.currentShiftId.startsWith("ABSENCE_") && (
-                  <div className="mb-4">
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Note (Appears in Excel)</label>
-                    <input 
-                      type="text" 
-                      placeholder="e.g. LL" 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                      defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
-                      onBlur={(e) => {
-                        if (onUpdatePrograms) {
-                          const newProgs = [...programs];
-                          const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
-                          const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
-                          if (aIdx !== -1) {
-                            currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
-                            newProgs[progIdx] = currentProg;
-                            onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                  <>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Note (Appears in Excel)</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. LL" 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
+                        onBlur={(e) => {
+                          if (onUpdatePrograms) {
+                            const newProgs = [...programs];
+                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                            if (aIdx !== -1) {
+                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
+                              newProgs[progIdx] = currentProg;
+                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                            }
                           }
-                        }
-                      }}
-                    />
-                  </div>
+                        }}
+                      />
+                    </div>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Duty Time (HH:MM)</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. 14:30" 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.customStartTime || ""}
+                        onBlur={(e) => {
+                          if (onUpdatePrograms) {
+                            const val = e.target.value.trim();
+                            const newProgs = [...programs];
+                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                            if (aIdx !== -1) {
+                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], customStartTime: val || undefined };
+                              newProgs[progIdx] = currentProg;
+                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                            }
+                          }
+                        }}
+                      />
+                    </div>
+                  </>
                 )}
 
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Move To</label>
@@ -4577,6 +4855,212 @@ export const ProgramDisplay: React.FC<Props> = ({
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm"
               >
                 Save Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-[2000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300">
+            <div className="bg-indigo-600 p-5 flex items-center justify-between">
+              <h3 className="font-black italic uppercase tracking-widest text-white leading-none flex items-center gap-2 text-base">
+                <Settings size={20} />
+                Program Settings
+              </h3>
+              <button 
+                onClick={() => setShowSettingsModal(false)}
+                className="text-white/80 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+              <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                <p className="text-xs font-semibold text-slate-500 leading-relaxed">
+                  These settings are linked to the program period: 
+                  <span className="block font-black text-indigo-600 mt-1 text-sm">{startDate} to {endDate}</span>
+                </p>
+              </div>
+
+              {/* Signatures Section */}
+              <div className="space-y-4">
+                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
+                  Signatures (Staff Excel)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Prepared By</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      placeholder="e.g. Operation Control"
+                      value={tempPrep}
+                      onChange={(e) => setTempPrep(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Revised By</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      placeholder="e.g. Duty Manager"
+                      value={tempRev}
+                      onChange={(e) => setTempRev(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  These names will be printed at the bottom of the exported Staff Excel sheet for this specific period. If blank, it will use the default signature from your user profile below.
+                </p>
+              </div>
+
+              {/* Default Signatures (User Profile) Section */}
+              <div className="space-y-4">
+                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
+                  Default Signatures (User Profile)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Default Prepared By</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      placeholder="e.g. Operation Control Center"
+                      value={tempDefaultPrep}
+                      onChange={(e) => setTempDefaultPrep(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Default Revised By</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      placeholder="e.g. Duty Manager"
+                      value={tempDefaultRev}
+                      onChange={(e) => setTempDefaultRev(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  These values are saved to your user profile in the database and will be used as the default signatures if no period-specific overrides are entered above.
+                </p>
+              </div>
+
+              {/* Day-Off Rest Section */}
+              <div className="space-y-4">
+                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
+                  Day-Off Rest limits (Gray Highlighting)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Min Off-Day Hours</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      value={tempMinOff}
+                      onChange={(e) => setTempMinOff(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Max Off-Day Hours</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
+                      value={tempMaxOff}
+                      onChange={(e) => setTempMaxOff(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  If rest after a day off is within this range, the cell will be highlighted in gray. If it falls below the minimum limit, it will trigger a warning.
+                </p>
+              </div>
+
+              {/* Off-Duty Staff Visibility */}
+              <div className="space-y-4">
+                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
+                  Off-Duty Staff Visibility
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      checked={tempHideDrivers}
+                      onChange={(e) => setTempHideDrivers(e.target.checked)}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-700">Hide Drivers</span>
+                      <span className="text-[10px] text-slate-400">Do not display drivers on off-duty days</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      checked={tempHideLabour}
+                      onChange={(e) => setTempHideLabour(e.target.checked)}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-700">Hide Labourers</span>
+                      <span className="text-[10px] text-slate-400">Do not display labourers on off-duty days</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      checked={tempHideSecurity}
+                      onChange={(e) => setTempHideSecurity(e.target.checked)}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-700">Hide Security</span>
+                      <span className="text-[10px] text-slate-400">Do not display security on off-duty days</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                      checked={tempHideAccountants}
+                      onChange={(e) => setTempHideAccountants(e.target.checked)}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-slate-700">Hide Accountants</span>
+                      <span className="text-[10px] text-slate-400">Do not display accountants on off-duty days</span>
+                    </div>
+                  </label>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  Toggle which staff groups/roles are hidden from the Off-Duty / Days Off lists on the Daily tab, PDF exports, and Excel sheets.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 justify-end">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl font-bold transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const minVal = parseFloat(tempMinOff) || 23;
+                  const maxVal = parseFloat(tempMaxOff) || 27;
+                  handleSaveSettings(tempPrep, tempRev, minVal, maxVal, tempDefaultPrep, tempDefaultRev);
+                }}
+                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm shadow-md shadow-indigo-600/10"
+              >
+                Save Settings
               </button>
             </div>
           </div>

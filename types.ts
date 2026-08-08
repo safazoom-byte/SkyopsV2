@@ -113,6 +113,7 @@ export interface Assignment {
   isExtension?: boolean;
   releaseTime?: string;
   initialShiftId?: string;
+  customStartTime?: string;
 }
 
 export interface OffDutyRecord {
@@ -127,6 +128,16 @@ export interface DailyProgram {
   offDuty?: OffDutyRecord[];
   notes?: Record<string, string>;
   shiftDrivers?: Record<string, string>;
+  periodSettings?: {
+    preparedBy?: string;
+    revisedBy?: string;
+    minOffDayHours?: number;
+    maxOffDayHours?: number;
+    hideDriversOffDuty?: boolean;
+    hideLabourOffDuty?: boolean;
+    hideSecurityOffDuty?: boolean;
+    hideAccountantsOffDuty?: boolean;
+  };
 }
 
 export interface ProgramVersion {

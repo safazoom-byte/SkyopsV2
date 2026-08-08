@@ -42,11 +42,31 @@ export const auth = {
     if (!client) return;
     return await client.auth.signOut();
   },
-  async getSession(): Promise<any> {
+  async getSession(timeoutMs = 0): Promise<any> {
     const client = supabase;
     if (!client) return null;
     try {
-      const { data, error } = await client.auth.getSession();
+      const getSessionPromise = client.auth.getSession();
+      
+      let data, error;
+      if (timeoutMs > 0) {
+        const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
+          setTimeout(() => {
+            resolve({
+              data: { session: null },
+              error: { message: "Network connection timed out (possible adblocker/VPN interference)" },
+            });
+          }, timeoutMs)
+        );
+        const result = await Promise.race([getSessionPromise, timeoutPromise]);
+        data = result.data;
+        error = result.error;
+      } else {
+        const result = await getSessionPromise;
+        data = result.data;
+        error = result.error;
+      }
+
       if (error) {
         console.warn("Session fetch error:", error.message);
         if (error.message.toLowerCase().includes("refresh token")) {
@@ -147,7 +167,7 @@ export const db = {
     if (!client) throw new Error("Supabase client not initialized");
     try {
       const session = await auth.getSession();
-      if (!session) throw new Error("Authentication session missing");
+      if (!session) return null;
       
       const profile = await this.getUserProfile();
       
@@ -242,23 +262,35 @@ export const db = {
             staffId: s.skill_ratings?.staffId,
           };
         }),
-        shifts: (shRes.data || []).map((s: any) => ({
-          id: s.id,
-          day: s.day || 0,
-          pickupDate: s.pickup_date,
-          pickupTime: s.pickup_time,
-          endDate: s.end_date,
-          endTime: s.end_time,
-          minStaff: s.min_staff || 1,
-          maxStaff: s.max_staff || 10,
-          roleCounts: s.role_counts || {},
-          flightIds: s.flight_ids || [],
-        })),
+        shifts: (shRes.data || []).map((s: any) => {
+          const rc = { ...(s.role_counts || {}) };
+          const isHidden = !!rc.__is_hidden;
+          delete rc.__is_hidden;
+          return {
+            id: s.id,
+            day: s.day || 0,
+            pickupDate: s.pickup_date,
+            pickupTime: s.pickup_time,
+            endDate: s.end_date,
+            endTime: s.end_time,
+            minStaff: s.min_staff ?? 1,
+            maxStaff: s.max_staff ?? 10,
+            roleCounts: rc,
+            flightIds: s.flight_ids || [],
+            isHidden,
+          };
+        }),
         programs: (pRes.data || []).map((p: any) => {
           const rawOffDuty = p.off_duty || [];
           const notesHacks = rawOffDuty.filter((od: any) => od.staffId === "NOTES_HACK");
           const driversHacks = rawOffDuty.filter((od: any) => od.staffId === "DRIVERS_HACK");
-          const actualOffDuty = rawOffDuty.filter((od: any) => od.staffId !== "NOTES_HACK" && od.staffId !== "DRIVERS_HACK");
+          const settingsHacks = rawOffDuty.filter((od: any) => od.staffId === "SETTINGS_HACK");
+          const actualOffDuty = rawOffDuty.filter(
+            (od: any) =>
+              od.staffId !== "NOTES_HACK" &&
+              od.staffId !== "DRIVERS_HACK" &&
+              od.staffId !== "SETTINGS_HACK"
+          );
           
           let notes = p.notes || {};
           if (notesHacks.length > 0) {
@@ -277,6 +309,7 @@ export const db = {
             offDuty: actualOffDuty,
             notes: notes,
             shiftDrivers: shiftDrivers,
+            periodSettings: settingsHacks.length > 0 ? settingsHacks[0].data : undefined,
           };
         }),
         leaveRequests: (lRes.data || []).map((l: any) => ({
@@ -453,20 +486,28 @@ export const db = {
     if (!ctx) return;
     try {
       await client.from("shifts").upsert(
-        shifts.map(s => ({
-          id: s.id,
-          user_id: ctx.userId,
-          airport_id: ctx.airportId,
-          day: s.day,
-          pickup_date: s.pickupDate,
-          pickup_time: s.pickupTime,
-          end_date: s.endDate,
-          end_time: s.endTime,
-          min_staff: s.minStaff || 1,
-          max_staff: s.maxStaff || 10,
-          role_counts: s.roleCounts || {},
-          flight_ids: s.flightIds || [],
-        }))
+        shifts.map(s => {
+          const rc = { ...(s.roleCounts || {}) };
+          if (s.isHidden) {
+            rc.__is_hidden = true as any;
+          } else {
+            delete rc.__is_hidden;
+          }
+          return {
+            id: s.id,
+            user_id: ctx.userId,
+            airport_id: ctx.airportId,
+            day: s.day,
+            pickup_date: s.pickupDate,
+            pickup_time: s.pickupTime,
+            end_date: s.endDate,
+            end_time: s.endTime,
+            min_staff: s.minStaff ?? 1,
+            max_staff: s.maxStaff ?? 10,
+            role_counts: rc,
+            flight_ids: s.flightIds || [],
+          };
+        })
       );
     } catch (e) {
       console.warn("Failed to upsert shifts batch:", e);
@@ -479,6 +520,12 @@ export const db = {
     const ctx = await this.getMutationContext();
     if (!ctx) return;
     try {
+      const rc = { ...(s.roleCounts || {}) };
+      if (s.isHidden) {
+        rc.__is_hidden = true as any;
+      } else {
+        delete rc.__is_hidden;
+      }
       await client.from("shifts").upsert({
         id: s.id,
         user_id: ctx.userId,
@@ -488,9 +535,9 @@ export const db = {
         pickup_time: s.pickupTime,
         end_date: s.endDate,
         end_time: s.endTime,
-        min_staff: s.minStaff || 1,
-        max_staff: s.maxStaff || 10,
-        role_counts: s.roleCounts || {},
+        min_staff: s.minStaff ?? 1,
+        max_staff: s.maxStaff ?? 10,
+        role_counts: rc,
         flight_ids: s.flightIds || [],
       });
     } catch (e) {
@@ -590,11 +637,11 @@ export const db = {
       const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
 
       try {
-        // Query ALL rows for these dates belonging to the current user to find any duplicate/stale records
+        // Query ALL rows for these dates belonging to the current scope (airport_id or user_id) to find any duplicate/stale records
         const { data: existingData, error: fetchError } = await client
           .from("programs")
           .select("id, date_string, airport_id")
-          .eq("user_id", ctx.userId)
+          .eq(ctx.matchCol, ctx.matchVal)
           .in("date_string", datesToOverwrite);
         
         if (fetchError) {
@@ -640,11 +687,14 @@ export const db = {
 
         const { error: insError } = await client.from("programs").upsert(
           programs.map((p) => {
-            const offDutyToSave = [
+            const offDutyToSave: any[] = [
                 ...(p.offDuty || []),
                 { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} },
                 { staffId: "DRIVERS_HACK", type: "NIL", data: p.shiftDrivers || {} }
             ];
+            if (p.periodSettings) {
+              offDutyToSave.push({ staffId: "SETTINGS_HACK", type: "NIL", data: p.periodSettings });
+            }
             
             const existingId = existingMap.get(p.dateString);
 
@@ -832,7 +882,13 @@ export const db = {
   },
 
   async getUserProfile(forceRefresh = false): Promise<UserProfile | null> {
-    const session = await auth.getSession();
+    let session;
+    try {
+      session = await auth.getSession();
+    } catch (e) {
+      console.warn("Failed to get session for profile fetch:", e);
+      return null;
+    }
     if (!session || !supabase) return null;
 
     if (!forceRefresh && cachedProfile && Date.now() - profileFetchTime < 5 * 60 * 1000) {
@@ -1039,6 +1095,9 @@ export const db = {
            const err = await response.json();
            throw new Error(err.error || "Failed to update profile");
         }
+        
+        cachedProfile = { ...profile };
+        profileFetchTime = Date.now();
       } catch (e) {
         console.warn("Exception updating profile:", e);
       }
@@ -1050,7 +1109,13 @@ export const db = {
       console.warn("Cannot delete master account.");
       return;
     }
-    const session = await auth.getSession();
+    let session;
+    try {
+      session = await auth.getSession();
+    } catch (e) {
+      console.warn("Could not get session for delete:", e);
+      return;
+    }
     if (!session) return;
     try {
       const res = await fetch("/api/users/delete", {
@@ -1108,7 +1173,13 @@ export const db = {
     entityId: string,
     details: string,
   ) {
-    const session = await auth.getSession();
+    let session;
+    try {
+      session = await auth.getSession();
+    } catch (e) {
+      console.warn("Could not get session for logAction:", e);
+      return;
+    }
     if (!session) return;
     const profile = await this.getUserProfile();
 
