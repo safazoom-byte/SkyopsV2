@@ -3965,7 +3965,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             if (!st) return null;
 
                                             const pDate = new Date(
-                                              prog.dateString!,
+                                              `${prog.dateString!}T12:00:00Z`,
                                             );
                                             const [ph, pm] = (a.customStartTime || shift.pickupTime)
                                               .split(":")
@@ -3998,8 +3998,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             if (a.isExtension && a.initialShiftId) {
                                               const initShift = shifts.find(s => s.id === a.initialShiftId);
                                               if (initShift) {
-                                                let start = a.customStartTime || initShift.pickupTime;
-                                                let end = a.releaseTime || shift.endTime;
+                                                const origAsg = prog.assignments.find(
+                                                  asg => asg.staffId === a.staffId && asg.shiftId === a.initialShiftId && !asg.isExtension
+                                                );
+                                                let start = a.customStartTime || (origAsg ? origAsg.customStartTime : undefined) || initShift.pickupTime;
+                                                let end = a.customEndTime || a.releaseTime || shift.endTime;
                                                 if (end.localeCompare(start) < 0) end += "+1";
                                                 extText = `${st.initials} (${start}-${end})`;
                                               }
@@ -4008,7 +4011,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             let target = 5;
                                             if (st.type === "Roster") {
                                               const progStart = new Date(
-                                                startDate,
+                                                `${startDate}T12:00:00Z`,
                                               );
                                               const progEnd = new Date(`${endDate}T12:00:00Z`);
                                               const workFrom = st.workFromDate
