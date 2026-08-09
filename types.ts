@@ -115,6 +115,7 @@ export interface Assignment {
   initialShiftId?: string;
   customStartTime?: string;
   customEndTime?: string;
+  customStartDate?: string;
   customEndDate?: string;
 }
 

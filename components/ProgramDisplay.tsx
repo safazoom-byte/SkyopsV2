@@ -513,11 +513,12 @@ export const ProgramDisplay: React.FC<Props> = ({
     const [ph, pm] = startStr.split(":").map(Number);
     const [sh, sm] = endStr.split(":").map(Number);
     
-    const actualDateString = assign?.dateString || dateString;
-    if (assign?.customEndDate && actualDateString) {
-      const startDt = new Date(`${actualDateString}T12:00:00Z`);
+    const actualStartDateString = assign?.customStartDate || assign?.dateString || dateString;
+    const actualEndDateString = assign?.customEndDate || (assign?.customStartDate ? assign.customStartDate : undefined);
+    if (actualEndDateString && actualStartDateString) {
+      const startDt = new Date(`${actualStartDateString}T12:00:00Z`);
       startDt.setHours(ph, pm, 0, 0);
-      const endDt = new Date(`${assign.customEndDate}T12:00:00Z`);
+      const endDt = new Date(`${actualEndDateString}T12:00:00Z`);
       endDt.setHours(sh, sm, 0, 0);
       const diffMs = endDt.getTime() - startDt.getTime();
       return Math.max(0, parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1)));
@@ -649,7 +650,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         const endStr = a.customEndTime || (a.isExtension && a.releaseTime ? a.releaseTime : s.endTime);
         const [ph, pm] = startStr.split(":").map(Number);
         const [sh, sm] = endStr.split(":").map(Number);
-        const startDt = new Date(`${a.dateString}T12:00:00Z`);
+        const startDt = new Date(`${a.customStartDate || a.dateString}T12:00:00Z`);
         startDt.setHours(ph, pm, 0, 0);
         
         let endDt: Date;
@@ -657,7 +658,7 @@ export const ProgramDisplay: React.FC<Props> = ({
           endDt = new Date(`${a.customEndDate}T12:00:00Z`);
           endDt.setHours(sh, sm, 0, 0);
         } else {
-          endDt = new Date(`${a.dateString}T12:00:00Z`);
+          endDt = new Date(`${a.customStartDate || a.dateString}T12:00:00Z`);
           endDt.setHours(sh, sm, 0, 0);
           if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
         }
@@ -2486,6 +2487,34 @@ export const ProgramDisplay: React.FC<Props> = ({
       return;
     }
     
+    const targetShift = getShift(targetShiftId);
+    if (!targetShift) return;
+
+    let customStartDate: string | undefined = undefined;
+    let customEndDate: string | undefined = undefined;
+
+    const origAsg = prog.assignments.find(asg => asg.staffId === staffId && asg.shiftId === initialShiftId && !asg.isExtension);
+    const initialShift = getShift(initialShiftId);
+    if (initialShift) {
+      const origStartStr = origAsg?.customStartTime || initialShift.pickupTime;
+      const [origStartH, origStartM] = origStartStr.split(":").map(Number);
+      const [targetStartH, targetStartM] = targetShift.pickupTime.split(":").map(Number);
+      
+      if (targetStartH < origStartH || (targetStartH === origStartH && targetStartM < origStartM)) {
+        customStartDate = getNextDateStr(date);
+      } else {
+        customStartDate = date;
+      }
+
+      const finalEndStr = releaseTime || targetShift.endTime;
+      const [targetEndH, targetEndM] = finalEndStr.split(":").map(Number);
+      if (targetEndH < targetStartH || (targetEndH === targetStartH && targetEndM < targetStartM)) {
+        customEndDate = getNextDateStr(customStartDate);
+      } else {
+        customEndDate = customStartDate;
+      }
+    }
+    
     const maxSort = Math.max(0, ...prog.assignments.map((a: any) => a.manualSortIndex || 0));
     prog.assignments.push({
       id: crypto.randomUUID(),
@@ -2496,7 +2525,9 @@ export const ProgramDisplay: React.FC<Props> = ({
       manualSortIndex: maxSort + 1,
       isExtension: true,
       initialShiftId,
-      releaseTime: releaseTime || undefined
+      releaseTime: releaseTime || undefined,
+      customStartDate,
+      customEndDate
     });
     
     newPrograms[progIndex] = prog;
@@ -2525,18 +2556,17 @@ export const ProgramDisplay: React.FC<Props> = ({
       const shift = getShift(assignment.shiftId || "");
       
       let finalEndDate: string | undefined = undefined;
-      if (localEndTime) {
-        const startStr = localStartTime || (shift ? shift.pickupTime : "");
-        if (startStr) {
-          const [ph, pm] = startStr.split(":").map(Number);
-          const [sh, sm] = localEndTime.split(":").map(Number);
-          if (sh < ph) {
-            // Next day
-            finalEndDate = getNextDateStr(staffActionModal.date);
-          } else {
-            // Same day
-            finalEndDate = staffActionModal.date;
-          }
+      const startStr = localStartTime || (shift ? shift.pickupTime : "");
+      const endStr = shift ? shift.endTime : "";
+      if (startStr && endStr) {
+        const [ph, pm] = startStr.split(":").map(Number);
+        const [sh, sm] = endStr.split(":").map(Number);
+        if (sh < ph) {
+          // Next day
+          finalEndDate = getNextDateStr(staffActionModal.date);
+        } else {
+          // Same day
+          finalEndDate = staffActionModal.date;
         }
       }
       
@@ -2544,7 +2574,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         ...assignment,
         note: localNote || undefined,
         customStartTime: localStartTime || undefined,
-        customEndTime: localEndTime || undefined,
+        customEndTime: undefined,
         customEndDate: finalEndDate
       };
       
@@ -2723,7 +2753,6 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const [localNote, setLocalNote] = useState("");
   const [localStartTime, setLocalStartTime] = useState("");
-  const [localEndTime, setLocalEndTime] = useState("");
 
   useEffect(() => {
     if (staffActionModal) {
@@ -2735,14 +2764,12 @@ export const ProgramDisplay: React.FC<Props> = ({
         if (assign) {
           setLocalNote(assign.note || "");
           setLocalStartTime(assign.customStartTime || "");
-          setLocalEndTime(assign.customEndTime || "");
           return;
         }
       }
     }
     setLocalNote("");
     setLocalStartTime("");
-    setLocalEndTime("");
   }, [staffActionModal, programs]);
 
   const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
@@ -4798,25 +4825,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                         onChange={(e) => setLocalNote(e.target.value)}
                       />
                     </div>
-                    <div className="mb-4 grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Time</label>
-                        <input 
-                          type="time" 
-                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                          value={localStartTime}
-                          onChange={(e) => setLocalStartTime(e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom End Time</label>
-                        <input 
-                          type="time" 
-                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                          value={localEndTime}
-                          onChange={(e) => setLocalEndTime(e.target.value)}
-                        />
-                      </div>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Time</label>
+                      <input 
+                        type="time" 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                        value={localStartTime}
+                        onChange={(e) => setLocalStartTime(e.target.value)}
+                      />
                     </div>
                     <button
                       onClick={handleSaveCustomDuty}
