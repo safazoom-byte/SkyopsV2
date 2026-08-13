@@ -26,7 +26,7 @@ async function startServer() {
         connectSrc: ["'self'", "https:", "wss:", "ws:", "data:"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         workerSrc: ["'self'", "blob:"],
-        frameAncestors: ["'*'", "*", "https:"],
+        frameAncestors: ["'self'", "https://ai.studio", "https://*.google.com"],
       },
     },
   }));
@@ -51,6 +51,23 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  function getSupabaseConfig(requireServiceKey = false) {
+    const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url) {
+      throw new Error("Missing SUPABASE_URL / VITE_SUPABASE_URL environment variable.");
+    }
+    if (!anonKey) {
+      throw new Error("Missing SUPABASE_ANON_KEY / VITE_SUPABASE_ANON_KEY environment variable.");
+    }
+    if (requireServiceKey && !serviceKey) {
+      throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable.");
+    }
+    return { url, anonKey, serviceKey: serviceKey as string };
+  }
+
   const callAI = async (req: express.Request, res: express.Response) => {
     try {
       const authHeader = req.headers.authorization;
@@ -58,14 +75,19 @@ async function startServer() {
         return res.status(401).json({ error: "Unauthorized" });
       }
       const token = authHeader.split(" ")[1];
-      const supabase = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.VITE_SUPABASE_ANON_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      const { url, anonKey } = getSupabaseConfig();
+      const supabase = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      let user = null;
+      try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (!error && data?.user) {
+          user = data.user;
+        }
+      } catch (e) {}
 
-      if (authError || !user) {
+      if (!user) {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -91,8 +113,8 @@ async function startServer() {
 
       res.json({ result: response.text });
     } catch (err: any) {
-      console.error("AI Error:", err);
-      res.status(500).json({ error: "Something went wrong" });
+      console.error("AI Error:", err?.message || err);
+      res.status(500).json({ error: "An error occurred while processing the request" });
     }
   };
 
@@ -107,22 +129,24 @@ async function startServer() {
       }
       const token = authHeader.split(" ")[1];
       const { email, password, role, airport_id } = req.body;
-      const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!hasServiceKey) {
-        return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
-      }
-      const supabaseAdmin = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      const supabaseAnon = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.VITE_SUPABASE_ANON_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-      if (authError || !caller) {
+      const { url, anonKey, serviceKey } = getSupabaseConfig(true);
+
+      const supabaseAdmin = createClient(url, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const supabaseAnon = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      let caller = null;
+      try {
+        const { data, error } = await supabaseAnon.auth.getUser(token);
+        if (!error && data?.user) {
+          caller = data.user;
+        }
+      } catch (e) {}
+
+      if (!caller) {
         return res.status(401).json({ error: "Unauthorized" });
       }
       
@@ -176,9 +200,9 @@ async function startServer() {
         });
       }
       res.json({ success: true, user: userObj });
-    } catch (err) {
-      console.error("Create user error:", err);
-      res.status(400).json({ error: "Something went wrong" });
+    } catch (err: any) {
+      console.error("Create user error:", err?.message || err);
+      res.status(400).json({ error: "An error occurred while creating the user" });
     }
   });
 
@@ -195,66 +219,102 @@ async function startServer() {
          return res.status(400).json({ error: "Missing profile or profile.id" });
       }
       
-      const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!hasServiceKey) {
-        return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
-      }
+      const { url, anonKey, serviceKey } = getSupabaseConfig(true);
       
-      const supabaseAdmin = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
+      const supabaseAdmin = createClient(url, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const supabaseAnon = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
       
-      const supabaseAnon = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.VITE_SUPABASE_ANON_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      
-      const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-      if (authError || !caller) {
+      let caller = null;
+      try {
+        const { data, error } = await supabaseAnon.auth.getUser(token);
+        if (!error && data?.user) {
+          caller = data.user;
+        }
+      } catch (e) {}
+
+      if (!caller) {
         return res.status(401).json({ error: "Unauthorized" });
       }
       
       const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
-      
-      // Allow if caller is super_admin, or if caller is admin updating a planner, OR if caller is updating themselves
+      if (!callerProfile) {
+         return res.status(403).json({ error: "Forbidden: Caller profile not found" });
+      }
+
       const isSelf = caller.id === profile.id;
-      const isSuperAdmin = callerProfile?.role === "super_admin";
-      const isAdmin = callerProfile?.role === "admin";
+      const isSuperAdmin = callerProfile.role === "super_admin";
+      const isAdmin = callerProfile.role === "admin";
       
       if (!isSelf && !isSuperAdmin && !isAdmin) {
          return res.status(403).json({ error: "Forbidden" });
       }
-      if (profile.email === "safazoom@gmail.com" && caller.email !== "safazoom@gmail.com") {
-         return res.status(403).json({ error: "Cannot modify master user" });
+
+      const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("*").eq("id", profile.id).maybeSingle();
+      if (!targetProfile) {
+         return res.status(404).json({ error: "Target profile not found" });
+      }
+
+      // Protection: Non-super admins cannot modify a super_admin profile
+      if (targetProfile.role === "super_admin" && !isSuperAdmin) {
+         return res.status(403).json({ error: "Cannot modify super_admin profile" });
+      }
+
+      // Protection: Admins updating non-self must only update planners
+      if (isAdmin && !isSuperAdmin && !isSelf && targetProfile.role !== "planner") {
+         return res.status(403).json({ error: "Admins can only update planners" });
+      }
+
+      // Build sanitized profile object based on role privileges
+      const sanitizedProfile: Record<string, any> = {
+        id: profile.id,
+        airport_id: profile.airport_id ?? targetProfile.airport_id,
+        company_logo: profile.companyLogo ?? profile.company_logo ?? targetProfile.company_logo,
+        skyops_logo: profile.skyopsLogo ?? profile.skyops_logo ?? targetProfile.skyops_logo,
+        prepared_by: profile.preparedBy ?? profile.prepared_by ?? targetProfile.prepared_by,
+        revised_by: profile.revisedBy ?? profile.revised_by ?? targetProfile.revised_by,
+      };
+
+      if (isSelf) {
+        // Self-edit (for ANY role, including admin and super_admin):
+        // Strictly preserve email, role, is_active, and all resource limits from targetProfile
+        sanitizedProfile.email = targetProfile.email;
+        sanitizedProfile.role = targetProfile.role;
+        sanitizedProfile.is_active = targetProfile.is_active;
+        sanitizedProfile.ai_daily_limit = targetProfile.ai_daily_limit;
+        sanitizedProfile.ai_weekly_limit = targetProfile.ai_weekly_limit;
+        sanitizedProfile.ai_monthly_limit = targetProfile.ai_monthly_limit;
+        sanitizedProfile.max_staff = targetProfile.max_staff;
+        sanitizedProfile.max_shifts = targetProfile.max_shifts;
+      } else if (isSuperAdmin) {
+        // Super Admin updating another user
+        sanitizedProfile.email = profile.email ?? targetProfile.email;
+        sanitizedProfile.role = profile.role ?? targetProfile.role;
+        sanitizedProfile.is_active = profile.isActive ?? profile.is_active ?? targetProfile.is_active;
+        sanitizedProfile.ai_daily_limit = profile.aiDailyLimit ?? profile.ai_daily_limit ?? targetProfile.ai_daily_limit;
+        sanitizedProfile.ai_weekly_limit = profile.aiWeeklyLimit ?? profile.ai_weekly_limit ?? targetProfile.ai_weekly_limit;
+        sanitizedProfile.ai_monthly_limit = profile.aiMonthlyLimit ?? profile.ai_monthly_limit ?? targetProfile.ai_monthly_limit;
+        sanitizedProfile.max_staff = profile.maxStaff ?? profile.max_staff ?? targetProfile.max_staff;
+        sanitizedProfile.max_shifts = profile.maxShifts ?? profile.max_shifts ?? targetProfile.max_shifts;
+      } else if (isAdmin) {
+        // Non-super Admin updating another user (target is guaranteed to be a planner)
+        if (profile.role && profile.role !== "planner" && profile.role !== targetProfile.role) {
+           return res.status(403).json({ error: "Admins can only assign the planner role" });
+        }
+        sanitizedProfile.email = profile.email ?? targetProfile.email;
+        sanitizedProfile.role = profile.role ?? targetProfile.role;
+        sanitizedProfile.is_active = profile.isActive ?? profile.is_active ?? targetProfile.is_active;
+        sanitizedProfile.ai_daily_limit = profile.aiDailyLimit ?? profile.ai_daily_limit ?? targetProfile.ai_daily_limit;
+        sanitizedProfile.ai_weekly_limit = profile.aiWeeklyLimit ?? profile.ai_weekly_limit ?? targetProfile.ai_weekly_limit;
+        sanitizedProfile.ai_monthly_limit = profile.aiMonthlyLimit ?? profile.ai_monthly_limit ?? targetProfile.ai_monthly_limit;
+        sanitizedProfile.max_staff = profile.maxStaff ?? profile.max_staff ?? targetProfile.max_staff;
+        sanitizedProfile.max_shifts = profile.maxShifts ?? profile.max_shifts ?? targetProfile.max_shifts;
       }
       
-      if (isAdmin && !isSuperAdmin && !isSelf) {
-         // Admins can only update planners
-         const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", profile.id).single();
-         if (targetProfile && targetProfile.role !== "planner") {
-            return res.status(403).json({ error: "Admins can only update planners" });
-         }
-      }
-      
-      const { error } = await supabaseAdmin.from("user_profiles").upsert({
-          id: profile.id,
-          email: profile.email,
-          role: profile.role,
-          airport_id: profile.airport_id,
-          ai_daily_limit: profile.aiDailyLimit,
-          ai_weekly_limit: profile.aiWeeklyLimit,
-          ai_monthly_limit: profile.aiMonthlyLimit,
-          max_staff: profile.maxStaff,
-          max_shifts: profile.maxShifts,
-          is_active: profile.isActive,
-          company_logo: profile.companyLogo,
-          skyops_logo: profile.skyopsLogo,
-          prepared_by: profile.preparedBy,
-          revised_by: profile.revisedBy,
-      });
+      const { error } = await supabaseAdmin.from("user_profiles").upsert(sanitizedProfile);
       
       if (error) {
          throw error;
@@ -262,8 +322,8 @@ async function startServer() {
       
       res.status(200).json({ success: true });
     } catch (err: any) {
-      console.error("Update user error:", err);
-      res.status(400).json({ error: "Something went wrong" });
+      console.error("Update user error:", err?.message || err);
+      res.status(400).json({ error: "An error occurred while updating the user profile" });
     }
   });
 
@@ -274,22 +334,24 @@ async function startServer() {
         return res.status(401).json({ error: "Unauthorized" });
       }
       const token = authHeader.split(" ")[1];
-      const hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (!hasServiceKey) {
-        return res.status(400).json({ error: "Missing SUPABASE_SERVICE_ROLE_KEY" });
-      }
-      const supabaseAdmin = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      const supabaseAnon = createClient(
-        process.env.VITE_SUPABASE_URL || "",
-        process.env.VITE_SUPABASE_ANON_KEY || "",
-        { auth: { autoRefreshToken: false, persistSession: false } }
-      );
-      const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-      if (authError || !caller) {
+      const { url, anonKey, serviceKey } = getSupabaseConfig(true);
+
+      const supabaseAdmin = createClient(url, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const supabaseAnon = createClient(url, anonKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      let caller = null;
+      try {
+        const { data, error } = await supabaseAnon.auth.getUser(token);
+        if (!error && data?.user) {
+          caller = data.user;
+        }
+      } catch (e) {}
+
+      if (!caller) {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -298,13 +360,20 @@ async function startServer() {
         return res.status(403).json({ error: "Forbidden" });
       }
 
-      const { id, email } = req.body;
+      const { id } = req.body;
       if (!id) return res.status(400).json({ error: "User ID is required" });
-      if (email === "safazoom@gmail.com") return res.status(403).json({ error: "Cannot delete master user" });
+
+      const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", id).maybeSingle();
+      if (!targetProfile) {
+         return res.status(404).json({ error: "Target profile not found" });
+      }
+
+      if (targetProfile.role === "super_admin" && callerProfile.role !== "super_admin") {
+         return res.status(403).json({ error: "Cannot delete super_admin user" });
+      }
 
       if (callerProfile.role === "admin") {
-         const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", id).single();
-         if (targetProfile && targetProfile.role !== "planner") {
+         if (targetProfile.role !== "planner") {
             return res.status(403).json({ error: "Admins can only delete planners" });
          }
       }
@@ -312,9 +381,9 @@ async function startServer() {
       await supabaseAdmin.auth.admin.deleteUser(id);
       await supabaseAdmin.from("user_profiles").delete().eq("id", id);
       res.json({ success: true });
-    } catch (err) {
-      console.error("Delete user error:", err);
-      res.status(400).json({ error: "Something went wrong" });
+    } catch (err: any) {
+      console.error("Delete user error:", err?.message || err);
+      res.status(400).json({ error: "An error occurred while deleting the user" });
     }
   });
 

@@ -69,27 +69,63 @@ export const auth = {
 
       if (error) {
         console.warn("Session fetch error:", error.message);
-        if (error.message.toLowerCase().includes("refresh token")) {
-          await client.auth.signOut().catch(() => {});
-          
-          if (typeof window !== "undefined") {
-            try {
-              for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
-                  localStorage.removeItem(key);
-                }
+        await client.auth.signOut().catch(() => {});
+        if (typeof window !== "undefined") {
+          try {
+            for (let i = 0; i < localStorage.length; i++) {
+              const key = localStorage.key(i);
+              if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                localStorage.removeItem(key);
               }
-            } catch (e) {
-              // ignore localStorage errors
             }
-          }
+          } catch (e) {}
         }
         return null;
       }
-      return data?.session || null;
+
+      const session = data?.session || null;
+      if (session) {
+        const expiresAt = session.expires_at;
+        const nowInSec = Math.floor(Date.now() / 1000);
+        if (expiresAt && expiresAt <= nowInSec) {
+          try {
+            const { data: refreshData, error: refreshError } = await client.auth.refreshSession();
+            if (refreshError || !refreshData?.session) {
+              await client.auth.signOut().catch(() => {});
+              if (typeof window !== "undefined") {
+                try {
+                  for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+                      localStorage.removeItem(key);
+                    }
+                  }
+                } catch (e) {}
+              }
+              return null;
+            }
+            return refreshData.session;
+          } catch (refErr) {
+            await client.auth.signOut().catch(() => {});
+            return null;
+          }
+        }
+      }
+
+      return session;
     } catch (e) {
       console.warn("getSession exception:", e);
+      await client.auth.signOut().catch(() => {});
+      if (typeof window !== "undefined") {
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith("sb-") && key.endsWith("-auth-token")) {
+              localStorage.removeItem(key);
+            }
+          }
+        } catch (err) {}
+      }
       return null;
     }
   },

@@ -48,18 +48,6 @@ import {
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
 
-const getNextDateStr = (dateStr: string) => {
-  const d = new Date(`${dateStr}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().split("T")[0];
-};
-
-const getPrevDateStr = (dateStr: string) => {
-  const d = new Date(`${dateStr}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().split("T")[0];
-};
-
 interface Props {
   programs: DailyProgram[];
   flights: Flight[];
@@ -505,25 +493,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
   };
 
-  const getShiftHours = (shiftId: string, assign?: any, dateString?: string) => {
+  const getShiftHours = (shiftId: string, assign?: any) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
     const startStr = assign?.customStartTime || shift.pickupTime;
-    const endStr = assign?.customEndTime || (assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime);
+    const endStr = assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime;
     const [ph, pm] = startStr.split(":").map(Number);
     const [sh, sm] = endStr.split(":").map(Number);
-    
-    const actualStartDateString = assign?.customStartDate || assign?.dateString || dateString;
-    const actualEndDateString = assign?.customEndDate || (assign?.customStartDate ? assign.customStartDate : undefined);
-    if (actualEndDateString && actualStartDateString) {
-      const startDt = new Date(`${actualStartDateString}T12:00:00Z`);
-      startDt.setHours(ph, pm, 0, 0);
-      const endDt = new Date(`${actualEndDateString}T12:00:00Z`);
-      endDt.setHours(sh, sm, 0, 0);
-      const diffMs = endDt.getTime() - startDt.getTime();
-      return Math.max(0, parseFloat((diffMs / (1000 * 60 * 60)).toFixed(1)));
-    }
-    
     let hours = sh - ph + (sm - pm) / 60;
     if (sh < ph) hours += 24;
     return hours;
@@ -531,11 +507,8 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const getStaffTotalHours = (staffId: string) => {
     return activePrograms.reduce((acc, p) => {
-      const assign = p.assignments.find((a) => a.staffId === staffId);
-      if (assign) {
-        return acc + getShiftHours(assign.shiftId || "", assign, p.dateString);
-      }
-      return acc;
+      const staffAssigns = p.assignments.filter((a) => a.staffId === staffId);
+      return acc + staffAssigns.reduce((sum, a) => sum + getShiftHours(a.shiftId || "", a), 0);
     }, 0);
   };
 
@@ -647,21 +620,14 @@ export const ProgramDisplay: React.FC<Props> = ({
       const s = getShift(a.shiftId || "");
       if (s) {
         const startStr = a.customStartTime || s.pickupTime;
-        const endStr = a.customEndTime || (a.isExtension && a.releaseTime ? a.releaseTime : s.endTime);
+        const endStr = a.isExtension && a.releaseTime ? a.releaseTime : s.endTime;
         const [ph, pm] = startStr.split(":").map(Number);
         const [sh, sm] = endStr.split(":").map(Number);
-        const startDt = new Date(`${a.customStartDate || a.dateString}T12:00:00Z`);
+        const startDt = new Date(`${a.dateString}T12:00:00Z`);
         startDt.setHours(ph, pm, 0, 0);
-        
-        let endDt: Date;
-        if (a.customEndDate) {
-          endDt = new Date(`${a.customEndDate}T12:00:00Z`);
-          endDt.setHours(sh, sm, 0, 0);
-        } else {
-          endDt = new Date(`${a.customStartDate || a.dateString}T12:00:00Z`);
-          endDt.setHours(sh, sm, 0, 0);
-          if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
-        }
+        const endDt = new Date(`${a.dateString}T12:00:00Z`);
+        endDt.setHours(sh, sm, 0, 0);
+        if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
         
         // We only consider previous shifts (ones that started before this current one).
         // If they end after currentShiftStart, diffMs will be negative and throw a warning.
@@ -1217,7 +1183,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             shiftStart.setHours(ph, pm, 0, 0);
             const rest = calculateRestHours(s.id, shiftStart);
             const restWarning = rest !== null && rest < minRestHours;
-            const duration = `${getShiftHours(assign.shiftId || "", assign, p.dateString).toFixed(1)}H`;
+            const duration = `${getShiftHours(assign.shiftId || "", assign).toFixed(1)}H`;
             const restLabel = rest !== null ? ` [${rest.toFixed(1)}H]` : "";
             const displayTime = assign.customStartTime || shift.pickupTime;
             const cellText = `${duration}\n${displayTime}${restLabel}`;
@@ -1857,6 +1823,16 @@ export const ProgramDisplay: React.FC<Props> = ({
               if (richText.length > 0) richText.push({ text: "\n" });
               richText.push({ text: shiftNote, font: { color: { argb: 'FFFF0000' }, bold: true } });
           }
+
+          const shiftDriverId = prog.shiftDrivers?.[shift.id];
+          if (shiftDriverId) {
+              const dObj = staff.find(s => s.id === shiftDriverId);
+              if (dObj) {
+                  if (richText.length > 0) richText.push({ text: "\n" });
+                  richText.push({ text: dObj.initials, font: { color: { argb: 'FF15803D' }, bold: true } });
+              }
+          }
+          
           if (richText.length > 0) {
               staffCell.value = { richText };
           }
@@ -2153,11 +2129,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                  else if (s.isDriver) type = "driver";
                  
                  let label = s.initials;
-                 if (a.customStartTime) {
-                   label = `${s.initials} from(${a.customStartTime})`;
-                   if (a.note) {
-                     label = `${s.initials} (${a.note}) from(${a.customStartTime})`;
-                   }
+                 if (a.isExtension && a.releaseTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} till(${a.releaseTime})`;
+                 } else if (a.customStartTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} from(${a.customStartTime})${a.releaseTime ? ` till(${a.releaseTime})` : ""}`;
+                 } else if (a.releaseTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} till(${a.releaseTime})`;
                  } else if (a.note) {
                    label = `${s.initials} (${a.note})`;
                  }
@@ -2475,45 +2452,24 @@ export const ProgramDisplay: React.FC<Props> = ({
     releaseTime: string
   ) => {
     if (!targetShiftId) return;
+    const targetShift = shifts.find(s => s.id === targetShiftId);
+    const targetDate = targetShift?.pickupDate || date;
+
     const newPrograms = [...programs];
-    const progIndex = newPrograms.findIndex((p) => p.dateString === date);
+    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
     if (progIndex === -1) return;
     
     const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
     
-    const isAlreadyAssigned = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId);
+    const isAlreadyAssigned = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId && !a.isExtension);
     if (isAlreadyAssigned) {
       alert("Staff already in this shift.");
       return;
     }
-    
-    const targetShift = getShift(targetShiftId);
-    if (!targetShift) return;
 
-    let customStartDate: string | undefined = undefined;
-    let customEndDate: string | undefined = undefined;
-
-    const origAsg = prog.assignments.find(asg => asg.staffId === staffId && asg.shiftId === initialShiftId && !asg.isExtension);
-    const initialShift = getShift(initialShiftId);
-    if (initialShift) {
-      const origStartStr = origAsg?.customStartTime || initialShift.pickupTime;
-      const [origStartH, origStartM] = origStartStr.split(":").map(Number);
-      const [targetStartH, targetStartM] = targetShift.pickupTime.split(":").map(Number);
-      
-      if (targetStartH < origStartH || (targetStartH === origStartH && targetStartM < origStartM)) {
-        customStartDate = getNextDateStr(date);
-      } else {
-        customStartDate = date;
-      }
-
-      const finalEndStr = releaseTime || targetShift.endTime;
-      const [targetEndH, targetEndM] = finalEndStr.split(":").map(Number);
-      if (targetEndH < targetStartH || (targetEndH === targetStartH && targetEndM < targetStartM)) {
-        customEndDate = getNextDateStr(customStartDate);
-      } else {
-        customEndDate = customStartDate;
-      }
-    }
+    const dayShifts = shifts.filter((s) => s.pickupDate === targetDate && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+    const isLastShift = dayShifts.length > 0 && dayShifts[dayShifts.length - 1].id === targetShiftId;
+    const finalReleaseTime = releaseTime || (isLastShift ? "06:30" : undefined);
     
     const maxSort = Math.max(0, ...prog.assignments.map((a: any) => a.manualSortIndex || 0));
     prog.assignments.push({
@@ -2525,65 +2481,17 @@ export const ProgramDisplay: React.FC<Props> = ({
       manualSortIndex: maxSort + 1,
       isExtension: true,
       initialShiftId,
-      releaseTime: releaseTime || undefined,
-      customStartDate,
-      customEndDate
+      releaseTime: finalReleaseTime
     });
     
     newPrograms[progIndex] = prog;
     if (onUpdatePrograms) {
-      onUpdatePrograms(newPrograms, [date]);
+      const datesToUpdate = Array.from(new Set([date, targetDate]));
+      onUpdatePrograms(newPrograms, datesToUpdate);
     }
     setStaffActionModal(null);
     setExtendReleaseTime("");
     setExtendTargetShiftId("");
-  };
-
-  const handleSaveCustomDuty = () => {
-    if (!staffActionModal || !onUpdatePrograms) return;
-    
-    const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
-    if (progIdx === -1) return;
-    
-    const newProgs = [...programs];
-    const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
-    const aIdx = currentProg.assignments.findIndex(
-      a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId
-    );
-    
-    if (aIdx !== -1) {
-      const assignment = currentProg.assignments[aIdx];
-      const shift = getShift(assignment.shiftId || "");
-      
-      let finalEndDate: string | undefined = undefined;
-      const startStr = localStartTime || (shift ? shift.pickupTime : "");
-      const endStr = shift ? shift.endTime : "";
-      if (startStr && endStr) {
-        const [ph, pm] = startStr.split(":").map(Number);
-        const [sh, sm] = endStr.split(":").map(Number);
-        if (sh < ph) {
-          // Next day
-          finalEndDate = getNextDateStr(staffActionModal.date);
-        } else {
-          // Same day
-          finalEndDate = staffActionModal.date;
-        }
-      }
-      
-      currentProg.assignments[aIdx] = {
-        ...assignment,
-        note: localNote || undefined,
-        customStartTime: localStartTime || undefined,
-        customEndTime: undefined,
-        customEndDate: finalEndDate
-      };
-      
-      newProgs[progIdx] = currentProg;
-      onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
-    }
-    
-    // Close the modal
-    setStaffActionModal(null);
   };
 
   const executeMove = (
@@ -2750,27 +2658,6 @@ export const ProgramDisplay: React.FC<Props> = ({
     date: string;
     role: string;
   } | null>(null);
-
-  const [localNote, setLocalNote] = useState("");
-  const [localStartTime, setLocalStartTime] = useState("");
-
-  useEffect(() => {
-    if (staffActionModal) {
-      const progIdx = programs.findIndex(p => p.dateString === staffActionModal.date);
-      if (progIdx !== -1) {
-        const assign = programs[progIdx].assignments.find(
-          a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId
-        );
-        if (assign) {
-          setLocalNote(assign.note || "");
-          setLocalStartTime(assign.customStartTime || "");
-          return;
-        }
-      }
-    }
-    setLocalNote("");
-    setLocalStartTime("");
-  }, [staffActionModal, programs]);
 
   const handleStaffItemTap = (e: React.MouseEvent, staffId: string, currentShiftId: string, date: string, role: string) => {
     e.stopPropagation();
@@ -2969,7 +2856,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                       !p.assignments.some((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; })
                     )
                       excusedLeaves++;
-                    const assign = p.assignments.find((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
+                    const staffAssignsOnDate = p.assignments.filter((a) => { const ts = getShift(a.shiftId || ""); return a.staffId === s.id && ts && !ts.isHidden; });
+                    const assign = staffAssignsOnDate[0];
 
                     const refProg = referencePrograms.find(
                       (rp) => rp.dateString === p.dateString,
@@ -2988,8 +2876,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                     if (!isStaffActiveOnDate(s, p.dateString!)) {
                        content = <span className="text-slate-200">/</span>;
                        cellClass = `px-4 py-2 text-center border-r border-slate-50 bg-slate-50`;
-                    } else if (assign) {
+                    } else if (staffAssignsOnDate.length > 0) {
                       workedCount++;
+                      const totalDailyHours = staffAssignsOnDate.reduce((sum, a) => sum + getShiftHours(a.shiftId || "", a), 0);
                       const shift = getShift(assign.shiftId || "");
                       if (shift) {
                         const pDate = new Date(`${p.dateString!}T12:00:00Z`);
@@ -3009,15 +2898,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                         } else if (dayOffRestWarning) {
                           cellClass += " !bg-slate-300 !text-slate-800 !border-slate-400 shadow-inner";
                         }
+                        const extReleaseTime = staffAssignsOnDate.find(a => a.releaseTime)?.releaseTime;
                         content = (
                           <div className="flex flex-col items-center gap-1">
                             <span className={`text-[9px] font-bold opacity-85 ${restWarning ? "text-white/90" : dayOffRestWarning ? "text-slate-700" : "text-slate-500"}`}>
-                              {getShiftHours(assign.shiftId || "", assign, p.dateString).toFixed(1)}H
+                              {totalDailyHours.toFixed(1)}H
                             </span>
                             <span
                               className={`font-bold ${restWarning ? "text-white" : dayOffRestWarning ? "text-slate-800" : "text-slate-900"}`}
                             >
-                              {assign.customStartTime || shift.pickupTime}
+                              {assign.customStartTime || shift.pickupTime}{extReleaseTime ? `-${extReleaseTime}` : ""}
                             </span>
                             {rest !== null && (
                               <span
@@ -3992,7 +3882,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             if (!st) return null;
 
                                             const pDate = new Date(
-                                              `${prog.dateString!}T12:00:00Z`,
+                                              prog.dateString!,
                                             );
                                             const [ph, pm] = (a.customStartTime || shift.pickupTime)
                                               .split(":")
@@ -4025,11 +3915,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             if (a.isExtension && a.initialShiftId) {
                                               const initShift = shifts.find(s => s.id === a.initialShiftId);
                                               if (initShift) {
-                                                const origAsg = prog.assignments.find(
-                                                  asg => asg.staffId === a.staffId && asg.shiftId === a.initialShiftId && !asg.isExtension
-                                                );
-                                                let start = a.customStartTime || (origAsg ? origAsg.customStartTime : undefined) || initShift.pickupTime;
-                                                let end = a.customEndTime || a.releaseTime || shift.endTime;
+                                                let start = a.customStartTime || initShift.pickupTime;
+                                                let end = a.releaseTime || shift.endTime;
                                                 if (end.localeCompare(start) < 0) end += "+1";
                                                 extText = `${st.initials} (${start}-${end})`;
                                               }
@@ -4038,7 +3925,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             let target = 5;
                                             if (st.type === "Roster") {
                                               const progStart = new Date(
-                                                `${startDate}T12:00:00Z`,
+                                                startDate,
                                               );
                                               const progEnd = new Date(`${endDate}T12:00:00Z`);
                                               const workFrom = st.workFromDate
@@ -4821,25 +4708,65 @@ export const ProgramDisplay: React.FC<Props> = ({
                         type="text" 
                         placeholder="e.g. LL" 
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                        value={localNote}
-                        onChange={(e) => setLocalNote(e.target.value)}
+                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.note || ""}
+                        onBlur={(e) => {
+                          if (onUpdatePrograms) {
+                            const newProgs = [...programs];
+                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                            if (aIdx !== -1) {
+                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], note: e.target.value };
+                              newProgs[progIdx] = currentProg;
+                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                            }
+                          }
+                        }}
                       />
                     </div>
                     <div className="mb-4">
-                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Time</label>
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Duty Time (HH:MM)</label>
                       <input 
-                        type="time" 
+                        type="text" 
+                        placeholder="e.g. 14:30" 
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
-                        value={localStartTime}
-                        onChange={(e) => setLocalStartTime(e.target.value)}
+                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.customStartTime || ""}
+                        onBlur={(e) => {
+                          if (onUpdatePrograms) {
+                            const val = e.target.value.trim();
+                            const newProgs = [...programs];
+                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                            if (aIdx !== -1) {
+                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], customStartTime: val || undefined };
+                              newProgs[progIdx] = currentProg;
+                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                            }
+                          }
+                        }}
                       />
                     </div>
-                    <button
-                      onClick={handleSaveCustomDuty}
-                      className="w-full p-3 mb-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors text-sm shadow-md flex items-center justify-center gap-2"
-                    >
-                      Save Duty Settings & Notes
-                    </button>
+                    <div className="mb-4">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Release / End Duty Time (HH:MM)</label>
+                      <input 
+                        type="text" 
+                        placeholder="e.g. 06:30" 
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
+                        defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.releaseTime || ""}
+                        onBlur={(e) => {
+                          if (onUpdatePrograms) {
+                            const val = e.target.value.trim();
+                            const newProgs = [...programs];
+                            const currentProg = { ...newProgs[progIdx], assignments: [...newProgs[progIdx].assignments] };
+                            const aIdx = currentProg.assignments.findIndex(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
+                            if (aIdx !== -1) {
+                              currentProg.assignments[aIdx] = { ...currentProg.assignments[aIdx], releaseTime: val || undefined };
+                              newProgs[progIdx] = currentProg;
+                              onUpdatePrograms(newProgs, [programs[progIdx].dateString as string]);
+                            }
+                          }
+                        }}
+                      />
+                    </div>
                   </>
                 )}
 
@@ -4885,17 +4812,44 @@ export const ProgramDisplay: React.FC<Props> = ({
                     <div className="flex gap-2">
                       <select
                         value={extendTargetShiftId}
-                        onChange={(e) => setExtendTargetShiftId(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setExtendTargetShiftId(val);
+                          const targetShift = shifts.find((s) => s.id === val);
+                          if (targetShift) {
+                            const dayShifts = shifts.filter((s) => s.pickupDate === targetShift.pickupDate && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                            const isLast = dayShifts.length > 0 && dayShifts[dayShifts.length - 1].id === val;
+                            if (isLast) {
+                              setExtendReleaseTime("06:30");
+                            }
+                          }
+                        }}
                         className="w-2/3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm font-bold text-emerald-700 focus:outline-none focus:border-emerald-400 focus:ring-4 focus:ring-emerald-400/20"
                       >
                         <option value="" disabled>Select shift...</option>
                         {(() => {
                           const dayShifts = shifts.filter((s) => s.pickupDate === staffActionModal.date && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
                           const currIdx = dayShifts.findIndex(s => s.id === staffActionModal.currentShiftId);
-                          const validShifts = currIdx !== -1 && currIdx < dayShifts.length - 1 ? [dayShifts[currIdx + 1]] : [];
-                          return validShifts.map(s => (
-                            <option key={s.id} value={s.id}>Shift at {s.pickupTime}</option>
-                          ));
+                          const sameDayShifts = currIdx !== -1 ? (currIdx < dayShifts.length - 1 ? dayShifts.slice(currIdx + 1) : [dayShifts[currIdx]]) : [];
+
+                          const currDateObj = new Date(`${staffActionModal.date}T12:00:00Z`);
+                          currDateObj.setDate(currDateObj.getDate() + 1);
+                          const nextDateStr = currDateObj.toISOString().split("T")[0];
+                          const nextDayShifts = shifts.filter((s) => s.pickupDate === nextDateStr && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+                          const nextDayFirstShift = nextDayShifts.length > 0 ? nextDayShifts[0] : null;
+
+                          return (
+                            <>
+                              {sameDayShifts.map(s => (
+                                <option key={s.id} value={s.id}>Shift at {s.pickupTime} {s.id === dayShifts[dayShifts.length - 1]?.id ? "(Till 06:30)" : ""}</option>
+                              ))}
+                              {nextDayFirstShift && !sameDayShifts.some(s => s.id === nextDayFirstShift.id) && (
+                                <option key={nextDayFirstShift.id} value={nextDayFirstShift.id}>
+                                  Next Day ({nextDateStr}) First Shift at {nextDayFirstShift.pickupTime} {nextDayShifts.length === 1 ? "(Till 06:30)" : ""}
+                                </option>
+                              )}
+                            </>
+                          );
                         })()}
                       </select>
                       <input 

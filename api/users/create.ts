@@ -17,8 +17,14 @@ export default async function handler(req: any, res: any) {
     const supabaseAdmin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
     const supabaseAnon = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
     
-    const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-    if (authError || !caller) return res.status(401).json({ error: "Unauthorized" });
+    let caller = null;
+    try {
+      const { data, error } = await supabaseAnon.auth.getUser(token);
+      if (!error && data?.user) {
+        caller = data.user;
+      }
+    } catch (e) {}
+    if (!caller) return res.status(401).json({ error: "Unauthorized" });
     
     const { email, password, role, airport_id } = req.body || {};
     

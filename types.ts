@@ -114,9 +114,6 @@ export interface Assignment {
   releaseTime?: string;
   initialShiftId?: string;
   customStartTime?: string;
-  customEndTime?: string;
-  customStartDate?: string;
-  customEndDate?: string;
 }
 
 export interface OffDutyRecord {

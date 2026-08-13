@@ -17,46 +17,84 @@ export default async function handler(req: any, res: any) {
     const supabaseAdmin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
     const supabaseAnon = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
     
-    const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-    if (authError || !caller) return res.status(401).json({ error: "Unauthorized" });
+    let caller = null;
+    try {
+      const { data, error } = await supabaseAnon.auth.getUser(token);
+      if (!error && data?.user) {
+        caller = data.user;
+      }
+    } catch (e) {}
+    if (!caller) return res.status(401).json({ error: "Unauthorized" });
     
     const { profile } = req.body || {};
     if (!profile || !profile.id) return res.status(400).json({ error: "Missing profile or profile.id" });
     
     const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
-    
+    if (!callerProfile) {
+       return res.status(403).json({ error: "Forbidden: Caller profile not found" });
+    }
+
     const isSelf = caller.id === profile.id;
-    const isSuperAdmin = callerProfile?.role === "super_admin";
-    const isAdmin = callerProfile?.role === "admin";
+    const isSuperAdmin = callerProfile.role === "super_admin";
+    const isAdmin = callerProfile.role === "admin";
     
     if (!isSelf && !isSuperAdmin && !isAdmin) return res.status(403).json({ error: "Forbidden" });
-    if (profile.email === "safazoom@gmail.com" && caller.email !== "safazoom@gmail.com") {
-        return res.status(403).json({ error: "Cannot modify master user" });
+    
+    const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("*").eq("id", profile.id).maybeSingle();
+    if (!targetProfile) {
+       return res.status(404).json({ error: "Target profile not found" });
+    }
+
+    if (targetProfile.role === "super_admin" && !isSuperAdmin) {
+       return res.status(403).json({ error: "Cannot modify super_admin profile" });
+    }
+
+    if (isAdmin && !isSuperAdmin && !isSelf && targetProfile.role !== "planner") {
+       return res.status(403).json({ error: "Admins can only update planners" });
+    }
+
+    const sanitizedProfile: Record<string, any> = {
+      id: profile.id,
+      airport_id: profile.airport_id ?? targetProfile.airport_id,
+      company_logo: profile.companyLogo ?? profile.company_logo ?? targetProfile.company_logo,
+      skyops_logo: profile.skyopsLogo ?? profile.skyops_logo ?? targetProfile.skyops_logo,
+      prepared_by: profile.preparedBy ?? profile.prepared_by ?? targetProfile.prepared_by,
+      revised_by: profile.revisedBy ?? profile.revised_by ?? targetProfile.revised_by,
+    };
+
+    if (isSelf) {
+      sanitizedProfile.email = targetProfile.email;
+      sanitizedProfile.role = targetProfile.role;
+      sanitizedProfile.is_active = targetProfile.is_active;
+      sanitizedProfile.ai_daily_limit = targetProfile.ai_daily_limit;
+      sanitizedProfile.ai_weekly_limit = targetProfile.ai_weekly_limit;
+      sanitizedProfile.ai_monthly_limit = targetProfile.ai_monthly_limit;
+      sanitizedProfile.max_staff = targetProfile.max_staff;
+      sanitizedProfile.max_shifts = targetProfile.max_shifts;
+    } else if (isSuperAdmin) {
+      sanitizedProfile.email = profile.email ?? targetProfile.email;
+      sanitizedProfile.role = profile.role ?? targetProfile.role;
+      sanitizedProfile.is_active = profile.isActive ?? profile.is_active ?? targetProfile.is_active;
+      sanitizedProfile.ai_daily_limit = profile.aiDailyLimit ?? profile.ai_daily_limit ?? targetProfile.ai_daily_limit;
+      sanitizedProfile.ai_weekly_limit = profile.aiWeeklyLimit ?? profile.ai_weekly_limit ?? targetProfile.ai_weekly_limit;
+      sanitizedProfile.ai_monthly_limit = profile.aiMonthlyLimit ?? profile.ai_monthly_limit ?? targetProfile.ai_monthly_limit;
+      sanitizedProfile.max_staff = profile.maxStaff ?? profile.max_staff ?? targetProfile.max_staff;
+      sanitizedProfile.max_shifts = profile.maxShifts ?? profile.max_shifts ?? targetProfile.max_shifts;
+    } else if (isAdmin) {
+      if (profile.role && profile.role !== "planner" && profile.role !== targetProfile.role) {
+         return res.status(403).json({ error: "Admins can only assign the planner role" });
+      }
+      sanitizedProfile.email = profile.email ?? targetProfile.email;
+      sanitizedProfile.role = profile.role ?? targetProfile.role;
+      sanitizedProfile.is_active = profile.isActive ?? profile.is_active ?? targetProfile.is_active;
+      sanitizedProfile.ai_daily_limit = profile.aiDailyLimit ?? profile.ai_daily_limit ?? targetProfile.ai_daily_limit;
+      sanitizedProfile.ai_weekly_limit = profile.aiWeeklyLimit ?? profile.ai_weekly_limit ?? targetProfile.ai_weekly_limit;
+      sanitizedProfile.ai_monthly_limit = profile.aiMonthlyLimit ?? profile.ai_monthly_limit ?? targetProfile.ai_monthly_limit;
+      sanitizedProfile.max_staff = profile.maxStaff ?? profile.max_staff ?? targetProfile.max_staff;
+      sanitizedProfile.max_shifts = profile.maxShifts ?? profile.max_shifts ?? targetProfile.max_shifts;
     }
     
-    if (isAdmin && !isSuperAdmin && !isSelf) {
-       const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", profile.id).single();
-       if (targetProfile && targetProfile.role !== "planner") {
-          return res.status(403).json({ error: "Admins can only update planners" });
-       }
-    }
-    
-    const { error } = await supabaseAdmin.from("user_profiles").upsert({
-        id: profile.id,
-        email: profile.email,
-        role: profile.role,
-        airport_id: profile.airport_id,
-        ai_daily_limit: profile.aiDailyLimit,
-        ai_weekly_limit: profile.aiWeeklyLimit,
-        ai_monthly_limit: profile.aiMonthlyLimit,
-        max_staff: profile.maxStaff,
-        max_shifts: profile.maxShifts,
-        is_active: profile.isActive,
-        company_logo: profile.companyLogo,
-        skyops_logo: profile.skyopsLogo,
-        prepared_by: profile.preparedBy,
-        revised_by: profile.revisedBy,
-    });
+    const { error } = await supabaseAdmin.from("user_profiles").upsert(sanitizedProfile);
     
     if (error) throw error;
     res.status(200).json({ success: true });

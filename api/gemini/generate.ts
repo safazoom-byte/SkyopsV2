@@ -28,9 +28,15 @@ export default async function handler(req: any, res: any) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    let user = null;
+    try {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (!error && data?.user) {
+        user = data.user;
+      }
+    } catch (e) {}
     
-    if (authError || !user) {
+    if (!user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 

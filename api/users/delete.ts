@@ -17,21 +17,34 @@ export default async function handler(req: any, res: any) {
     const supabaseAdmin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
     const supabaseAnon = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
     
-    const { data: { user: caller }, error: authError } = await supabaseAnon.auth.getUser(token);
-    if (authError || !caller) return res.status(401).json({ error: "Unauthorized" });
+    let caller = null;
+    try {
+      const { data, error } = await supabaseAnon.auth.getUser(token);
+      if (!error && data?.user) {
+        caller = data.user;
+      }
+    } catch (e) {}
+    if (!caller) return res.status(401).json({ error: "Unauthorized" });
     
     const { data: callerProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", caller.id).single();
     if (!callerProfile || (callerProfile.role !== "super_admin" && callerProfile.role !== "admin")) {
       return res.status(403).json({ error: "Forbidden" });
     }
     
-    const { id, email } = req.body;
+    const { id } = req.body;
     if (!id) return res.status(400).json({ error: "User ID is required" });
-    if (email === "safazoom@gmail.com") return res.status(403).json({ error: "Cannot delete master user" });
-    
+
+    const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", id).maybeSingle();
+    if (!targetProfile) {
+       return res.status(404).json({ error: "Target profile not found" });
+    }
+
+    if (targetProfile.role === "super_admin" && callerProfile.role !== "super_admin") {
+       return res.status(403).json({ error: "Cannot delete super_admin user" });
+    }
+
     if (callerProfile.role === "admin") {
-       const { data: targetProfile } = await supabaseAdmin.from("user_profiles").select("role").eq("id", id).single();
-       if (targetProfile && targetProfile.role !== "planner") {
+       if (targetProfile.role !== "planner") {
           return res.status(403).json({ error: "Admins can only delete planners" });
        }
     }
