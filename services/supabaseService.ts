@@ -1043,15 +1043,6 @@ export const db = {
       }
     }
 
-    if (profile && profile.email === "safazoom@gmail.com" && profile.role !== "super_admin") {
-      profile.role = "super_admin";
-      try {
-        await supabase.from("user_profiles").update({ role: "super_admin" }).eq("id", profile.id);
-      } catch (e) {
-        console.warn("Failed to update safazoom to super_admin in DB:", e);
-      }
-    }
-
     cachedProfile = profile;
     profileFetchTime = Date.now();
     return profile;
