@@ -487,11 +487,50 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
   };
 
+  const getStaffDayWorkingHours = (staffId: string, dateString: string, pAssignments?: any[]) => {
+    const assigns = (pAssignments || (programs.find(p => p.dateString === dateString)?.assignments || [])).filter(
+      (a: any) => {
+        const ts = getShift(a.shiftId || "");
+        return a.staffId === staffId && ts && !ts.isHidden;
+      }
+    );
+    if (assigns.length === 0) return 0;
+
+    // Check if there is an extended continuous duty sequence
+    const hasExt = assigns.some((a: any) => a.isExtension || assigns.some((other: any) => other.isExtension && other.initialShiftId === a.shiftId));
+    if (hasExt) {
+      // Find the earliest start time among the assignments on that date
+      let earliestMinutes = Infinity;
+      let latestEndMinutes = -Infinity;
+
+      assigns.forEach((a: any) => {
+        const ts = getShift(a.shiftId || "");
+        if (!ts) return;
+        const startStr = a.customStartTime || ts.pickupTime;
+        const [sh, sm] = startStr.split(":").map(Number);
+        const startMin = sh * 60 + sm;
+        if (startMin < earliestMinutes) earliestMinutes = startMin;
+
+        const endStr = a.releaseTime || ts.endTime;
+        const [eh, em] = endStr.split(":").map(Number);
+        let endMin = eh * 60 + em;
+        if (endMin < startMin) endMin += 24 * 60; // Overnight
+        if (endMin > latestEndMinutes) latestEndMinutes = endMin;
+      });
+
+      if (earliestMinutes !== Infinity && latestEndMinutes !== -Infinity) {
+        return Math.max(0, (latestEndMinutes - earliestMinutes) / 60);
+      }
+    }
+
+    return assigns.reduce((sum: number, a: any) => sum + getShiftHours(a.shiftId || "", a), 0);
+  };
+
   const getShiftHours = (shiftId: string, assign?: any) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
     const startStr = assign?.customStartTime || shift.pickupTime;
-    const endStr = assign?.isExtension && assign?.releaseTime ? assign.releaseTime : shift.endTime;
+    const endStr = assign?.releaseTime ? assign.releaseTime : shift.endTime;
     const [ph, pm] = startStr.split(":").map(Number);
     const [sh, sm] = endStr.split(":").map(Number);
     let hours = sh - ph + (sm - pm) / 60;
@@ -501,8 +540,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
   const getStaffTotalHours = (staffId: string) => {
     return activePrograms.reduce((acc, p) => {
-      const staffAssigns = p.assignments.filter((a) => a.staffId === staffId);
-      return acc + staffAssigns.reduce((sum, a) => sum + getShiftHours(a.shiftId || "", a), 0);
+      return acc + getStaffDayWorkingHours(staffId, p.dateString || "", p.assignments);
     }, 0);
   };
 
@@ -854,11 +892,12 @@ export const ProgramDisplay: React.FC<Props> = ({
             const st = getStaff(a.staffId);
             if (!st) return "";
             let label = st.initials;
-            if (a.customStartTime) {
-              label = `${st.initials} from(${a.customStartTime})`;
-              if (a.note) {
-                label = `${st.initials} (${a.note}) from(${a.customStartTime})`;
-              }
+            if (a.customStartTime && a.releaseTime) {
+              label = `${st.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime}) (till ${a.releaseTime})`;
+            } else if (a.customStartTime) {
+              label = `${st.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime})`;
+            } else if (a.releaseTime) {
+              label = `${st.initials}${a.note ? ` (${a.note})` : ""} (till ${a.releaseTime})`;
             } else if (a.note) {
               label = `${st.initials} (${a.note})`;
             }
@@ -1641,11 +1680,12 @@ export const ProgramDisplay: React.FC<Props> = ({
                  );
                  const isAnyExtended = a.isExtension || isOriginalShiftOfExtension;
 
-                 if (a.customStartTime) {
-                   label = `${s.initials} from(${a.customStartTime})`;
-                   if (a.note) {
-                     label = `${s.initials} (${a.note}) from(${a.customStartTime})`;
-                   }
+                 if (a.customStartTime && a.releaseTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime}) (till ${a.releaseTime})`;
+                 } else if (a.customStartTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime})`;
+                 } else if (a.releaseTime) {
+                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} (till ${a.releaseTime})`;
                  } else if (a.note) {
                    label = `${s.initials} (${a.note})`;
                  }
@@ -2123,15 +2163,15 @@ export const ProgramDisplay: React.FC<Props> = ({
                  else if (s.isDriver) type = "driver";
                  
                  let label = s.initials;
-                 if (a.isExtension && a.releaseTime) {
-                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} till(${a.releaseTime})`;
-                 } else if (a.customStartTime) {
-                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} from(${a.customStartTime})${a.releaseTime ? ` till(${a.releaseTime})` : ""}`;
-                 } else if (a.releaseTime) {
-                   label = `${s.initials}${a.note ? ` (${a.note})` : ""} till(${a.releaseTime})`;
-                 } else if (a.note) {
-                   label = `${s.initials} (${a.note})`;
-                 }
+                  if (a.customStartTime && a.releaseTime) {
+                    label = `${s.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime}) (till ${a.releaseTime})`;
+                  } else if (a.customStartTime) {
+                    label = `${s.initials}${a.note ? ` (${a.note})` : ""}(From ${a.customStartTime})`;
+                  } else if (a.releaseTime) {
+                    label = `${s.initials}${a.note ? ` (${a.note})` : ""} (till ${a.releaseTime})`;
+                  } else if (a.note) {
+                    label = `${s.initials} (${a.note})`;
+                  }
                  
                  return { text: label, type };
              }).filter(Boolean) as {text: string, type: string}[];
@@ -2445,43 +2485,114 @@ export const ProgramDisplay: React.FC<Props> = ({
     targetShiftId: string,
     releaseTime: string
   ) => {
-    if (!targetShiftId) return;
-    const targetShift = shifts.find(s => s.id === targetShiftId);
-    const targetDate = targetShift?.pickupDate || date;
+    // Find initial shift
+    const initialShift = shifts.find(s => s.id === initialShiftId);
+    if (!initialShift) return;
 
-    const newPrograms = [...programs];
-    const progIndex = newPrograms.findIndex((p) => p.dateString === targetDate);
-    if (progIndex === -1) return;
+    let targetShift = targetShiftId ? shifts.find(s => s.id === targetShiftId) : undefined;
     
-    const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
+    // If no target shift selected but releaseTime is provided, find the shift covering or ending at releaseTime
+    const initialDate = initialShift.pickupDate || date;
+    const sameDayShifts = shifts.filter(s => s.pickupDate === initialDate && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+    const initIdx = sameDayShifts.findIndex(s => s.id === initialShiftId);
     
-    const isAlreadyAssigned = prog.assignments.some(a => a.staffId === staffId && a.shiftId === targetShiftId && !a.isExtension);
-    if (isAlreadyAssigned) {
-      alert("Staff already in this shift.");
-      return;
+    // Next day first shift if applicable
+    const currDateObj = new Date(`${initialDate}T12:00:00Z`);
+    currDateObj.setUTCDate(currDateObj.getUTCDate() + 1);
+    const nextDateStr = currDateObj.toISOString().split("T")[0];
+    const nextDayShifts = shifts.filter(s => s.pickupDate === nextDateStr && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
+
+    if (!targetShift) {
+      if (releaseTime) {
+        // Find best target shift based on release time
+        if (sameDayShifts.length > 0) {
+          targetShift = sameDayShifts[sameDayShifts.length - 1];
+        }
+      }
     }
 
-    const dayShifts = shifts.filter((s) => s.pickupDate === targetDate && !s.isHidden).sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
-    const isLastShift = dayShifts.length > 0 && dayShifts[dayShifts.length - 1].id === targetShiftId;
-    const finalReleaseTime = releaseTime || (isLastShift ? "06:30" : undefined);
-    
-    const maxSort = Math.max(0, ...prog.assignments.map((a: any) => a.manualSortIndex || 0));
-    prog.assignments.push({
-      id: crypto.randomUUID(),
-      staffId,
-      shiftId: targetShiftId,
-      flightId: "",
-      role,
-      manualSortIndex: maxSort + 1,
-      isExtension: true,
-      initialShiftId,
-      releaseTime: finalReleaseTime
+    if (!targetShift) return;
+
+    // Collect all shifts in the sequence from initialShift up to targetShift
+    const shiftsToExtend: ShiftConfig[] = [];
+    if (targetShift.pickupDate === initialDate) {
+      const targetIdx = sameDayShifts.findIndex(s => s.id === targetShift!.id);
+      if (targetIdx !== -1 && initIdx !== -1) {
+        for (let i = initIdx + 1; i <= targetIdx; i++) {
+          shiftsToExtend.push(sameDayShifts[i]);
+        }
+      } else if (targetShift.id !== initialShiftId) {
+        shiftsToExtend.push(targetShift);
+      }
+    } else {
+      // Crosses into next day
+      if (initIdx !== -1) {
+        for (let i = initIdx + 1; i < sameDayShifts.length; i++) {
+          shiftsToExtend.push(sameDayShifts[i]);
+        }
+      }
+      const targetNextIdx = nextDayShifts.findIndex(s => s.id === targetShift!.id);
+      if (targetNextIdx !== -1) {
+        for (let i = 0; i <= targetNextIdx; i++) {
+          shiftsToExtend.push(nextDayShifts[i]);
+        }
+      } else {
+        shiftsToExtend.push(targetShift);
+      }
+    }
+
+    if (shiftsToExtend.length === 0) {
+      // If user is just setting a release time on the current shift
+      shiftsToExtend.push(targetShift);
+    }
+
+    const newPrograms = [...programs];
+    const datesToUpdate = new Set<string>([date]);
+
+    // Apply extension across all target/intermediate shifts
+    shiftsToExtend.forEach((sh, idx) => {
+      const isLastInSequence = idx === shiftsToExtend.length - 1;
+      const shDate = sh.pickupDate || date;
+      datesToUpdate.add(shDate);
+
+      const progIndex = newPrograms.findIndex(p => p.dateString === shDate);
+      if (progIndex === -1) return;
+
+      const prog = { ...newPrograms[progIndex], assignments: [...newPrograms[progIndex].assignments] };
+      const existingAssignIdx = prog.assignments.findIndex(a => a.staffId === staffId && a.shiftId === sh.id);
+
+      const isLastShiftOfDay = (sh.pickupDate === initialDate && sameDayShifts.length > 0 && sameDayShifts[sameDayShifts.length - 1].id === sh.id) ||
+                               (sh.pickupDate === nextDateStr && nextDayShifts.length > 0 && nextDayShifts[nextDayShifts.length - 1].id === sh.id);
+      
+      const assignedReleaseTime = isLastInSequence ? (releaseTime || (isLastShiftOfDay ? "06:30" : sh.endTime)) : undefined;
+
+      if (existingAssignIdx !== -1) {
+        prog.assignments[existingAssignIdx] = {
+          ...prog.assignments[existingAssignIdx],
+          isExtension: sh.id !== initialShiftId,
+          initialShiftId: sh.id !== initialShiftId ? initialShiftId : undefined,
+          releaseTime: assignedReleaseTime || prog.assignments[existingAssignIdx].releaseTime,
+        };
+      } else {
+        const maxSort = Math.max(0, ...prog.assignments.map((a: any) => a.manualSortIndex || 0));
+        prog.assignments.push({
+          id: crypto.randomUUID(),
+          staffId,
+          shiftId: sh.id,
+          flightId: "",
+          role,
+          manualSortIndex: maxSort + 1,
+          isExtension: true,
+          initialShiftId,
+          releaseTime: assignedReleaseTime,
+        });
+      }
+
+      newPrograms[progIndex] = prog;
     });
-    
-    newPrograms[progIndex] = prog;
+
     if (onUpdatePrograms) {
-      const datesToUpdate = Array.from(new Set([date, targetDate]));
-      onUpdatePrograms(newPrograms, datesToUpdate);
+      onUpdatePrograms(newPrograms, Array.from(datesToUpdate));
     }
     setStaffActionModal(null);
     setExtendReleaseTime("");
@@ -2721,17 +2832,30 @@ export const ProgramDisplay: React.FC<Props> = ({
     d.setUTCDate(d.getUTCDate() - 1);
     const prevDateString = d.toISOString().split("T")[0];
     
-    const prevProg = activePrograms.find(p => p.dateString === prevDateString);
-    if (!prevProg) {
-      return false;
+    // Check in all loaded database programs (including prior weeks/days)
+    const prevProg = programs.find(p => p.dateString === prevDateString);
+    if (prevProg) {
+      const workedPrevDay = prevProg.assignments.some(a => {
+        const ts = getShift(a.shiftId || "");
+        return a.staffId === staffId && ts && !ts.isHidden;
+      });
+      return !workedPrevDay;
     }
     
-    const workedPrevDay = prevProg.assignments.some(a => {
-      const ts = getShift(a.shiftId || "");
-      return a.staffId === staffId && ts && !ts.isHidden;
-    });
-    
-    return !workedPrevDay;
+    // Check in leave requests
+    const isOffInLeave = leaveRequests.some(
+      lr => lr.staffId === staffId && lr.startDate <= prevDateString && lr.endDate >= prevDateString
+    );
+    if (isOffInLeave) return true;
+
+    // Check in incoming duties
+    const staffIncoming = incomingDutiesByStaff[staffId] || [];
+    const prevIncoming = staffIncoming.find(d => (d.date || "") === prevDateString);
+    if (prevIncoming) {
+      return prevIncoming.shiftEndTime === "OFF" || !prevIncoming.shiftEndTime;
+    }
+
+    return false;
   };
 
   const getStaffColor = (
@@ -2739,13 +2863,14 @@ export const ProgramDisplay: React.FC<Props> = ({
     daysWorked: number,
     restHours: number | null,
     isDayOffWarning: boolean = false,
+    isRestWarning: boolean = false,
   ) => {
-    if (isDayOffWarning) {
-      return "bg-slate-200 border-slate-300 text-slate-800 hover:bg-slate-300 shadow-sm";
+    if (isRestWarning || (restHours !== null && !isDayOffWarning && restHours < minRestHours)) {
+      return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
     }
 
-    if (restHours !== null && restHours < minRestHours) {
-      return "bg-orange-500 text-white border-orange-400 shadow-[0_0_10px_rgba(249,115,22,0.5)]";
+    if (isDayOffWarning) {
+      return "bg-slate-200 border-slate-300 text-slate-800 hover:bg-slate-300 shadow-sm";
     }
 
     const target = staffStats[s.id]?.target ?? 5;
@@ -2872,7 +2997,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                        cellClass = `px-4 py-2 text-center border-r border-slate-50 bg-slate-50`;
                     } else if (staffAssignsOnDate.length > 0) {
                       workedCount++;
-                      const totalDailyHours = staffAssignsOnDate.reduce((sum, a) => sum + getShiftHours(a.shiftId || "", a), 0);
+                      const totalDailyHours = getStaffDayWorkingHours(s.id, p.dateString!, staffAssignsOnDate);
                       const shift = getShift(assign.shiftId || "");
                       if (shift) {
                         const pDate = new Date(`${p.dateString!}T12:00:00Z`);
@@ -2892,7 +3017,16 @@ export const ProgramDisplay: React.FC<Props> = ({
                         } else if (dayOffRestWarning) {
                           cellClass += " !bg-slate-300 !text-slate-800 !border-slate-400 shadow-inner";
                         }
-                        const extReleaseTime = staffAssignsOnDate.find(a => a.releaseTime)?.releaseTime;
+                        const firstStart = staffAssignsOnDate.reduce((earliest, a) => {
+                          const ts = getShift(a.shiftId || "");
+                          const t = a.customStartTime || ts?.pickupTime || "99:99";
+                          return t.localeCompare(earliest) < 0 ? t : earliest;
+                        }, assign.customStartTime || shift.pickupTime);
+                        const latestEnd = staffAssignsOnDate.reduce((latest, a) => {
+                          const ts = getShift(a.shiftId || "");
+                          const t = a.releaseTime || ts?.endTime || "00:00";
+                          return t.localeCompare(latest) > 0 ? t : latest;
+                        }, "");
                         content = (
                           <div className="flex flex-col items-center gap-1">
                             <span className={`text-[9px] font-bold opacity-85 ${restWarning ? "text-white/90" : dayOffRestWarning ? "text-slate-700" : "text-slate-500"}`}>
@@ -2901,7 +3035,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                             <span
                               className={`font-bold ${restWarning ? "text-white" : dayOffRestWarning ? "text-slate-800" : "text-slate-900"}`}
                             >
-                              {assign.customStartTime || shift.pickupTime}{extReleaseTime ? `-${extReleaseTime}` : ""}
+                              {firstStart}{latestEnd ? `-${latestEnd}` : ""}
                             </span>
                             {rest !== null && (
                               <span
@@ -3901,21 +4035,19 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             const colorClassBase = getStaffColor(
                                               st,
                                               daysWorked,
-                                              rest, dayOffRestWarning,
+                                              rest,
+                                              dayOffRestWarning,
+                                              restWarning,
                                             );
                                             const colorClass = a.isExtension
                                               ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
                                               : colorClassBase;
                                             
-                                            let extText = a.customStartTime ? `${st.initials} from(${a.customStartTime})` : st.initials;
-                                            if (a.isExtension && a.initialShiftId) {
-                                              const initShift = shifts.find(s => s.id === a.initialShiftId);
-                                              if (initShift) {
-                                                let start = a.customStartTime || initShift.pickupTime;
-                                                let end = a.releaseTime || shift.endTime;
-                                                if (end.localeCompare(start) < 0) end += "+1";
-                                                extText = `${st.initials} (${start}-${end})`;
-                                              }
+                                            let extText = st.initials;
+                                            if (a.customStartTime) {
+                                              extText = `${st.initials}(From ${a.customStartTime})`;
+                                            } else if (a.releaseTime) {
+                                              extText = `${st.initials} (till ${a.releaseTime})`;
                                             }
 
                                             let target = 5;
@@ -4857,14 +4989,14 @@ export const ProgramDisplay: React.FC<Props> = ({
                     </div>
                     <button
                       onClick={() => {
-                        if (extendTargetShiftId) {
+                        if (extendTargetShiftId || extendReleaseTime) {
                           const currentAssignment = programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId);
                           const trueInitialShiftId = currentAssignment?.isExtension && currentAssignment.initialShiftId ? currentAssignment.initialShiftId : staffActionModal.currentShiftId;
                           executeExtend(staffActionModal.staffId, trueInitialShiftId, staffActionModal.date, staffActionModal.role, extendTargetShiftId, extendReleaseTime);
                         }
                       }}
-                      disabled={!extendTargetShiftId}
-                      className="mt-3 w-full p-3 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold uppercase tracking-widest text-xs transition-colors"
+                      disabled={!extendTargetShiftId && !extendReleaseTime}
+                      className="mt-3 w-full p-3 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold uppercase tracking-widest text-xs transition-colors shadow-lg shadow-emerald-500/20"
                     >
                       Confirm Extension
                     </button>
