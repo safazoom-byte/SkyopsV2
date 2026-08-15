@@ -408,20 +408,102 @@ export const generateAIProgram = async (
 
   let validAssignmentsCount = 0;
   const staffLastEndTime = new Map<string, Date>();
+
+  // ─── AUTO-SEED: Read last 3 days of old programs to detect previous shift ends ───
+  // This replaces the need to manually enter the Rest Log every week.
+  // Priority: later timestamp always wins (latest shift end = most restrictive).
+  const AUTO_LOOKBACK_DAYS = 3;
+  for (let lb = 1; lb <= AUTO_LOOKBACK_DAYS; lb++) {
+    const lbDate = new Date(`${config.startDate}T00:00:00Z`);
+    lbDate.setUTCDate(lbDate.getUTCDate() - lb);
+    const lbDateStr = lbDate.toISOString().split("T")[0];
+
+    const oldProgram = data.programs?.find((p) => p.dateString === lbDateStr);
+    if (!oldProgram) continue;
+
+    // Step A: Extract shift end times from assignments in old program day
+    for (const assignment of oldProgram.assignments) {
+      if (!assignment.shiftId) continue;
+      const shift = data.shifts.find((s) => s.id === assignment.shiftId);
+      if (!shift) continue;
+
+      const [ph, pm] = shift.pickupTime.split(":").map(Number);
+      const [sh, sm] = shift.endTime.split(":").map(Number);
+      // Use shift.pickupDate as the base (may differ from lbDateStr for multi-day shifts)
+      const baseDate = shift.pickupDate || lbDateStr;
+      const endDt = new Date(`${baseDate}T00:00:00Z`);
+      endDt.setUTCHours(sh, sm, 0, 0);
+      // If shift end hour is before pickup hour it crosses midnight → add 1 day
+      if (sh < ph || (sh === ph && sm < pm)) {
+        endDt.setUTCDate(endDt.getUTCDate() + 1);
+      }
+
+      const existing = staffLastEndTime.get(assignment.staffId);
+      if (!existing || endDt > existing) {
+        staffLastEndTime.set(assignment.staffId, endDt);
+      }
+    }
+  }
+
+  // Step B: Extend rest clock to END of day for any Day Off / Leave day
+  // If staff ended shift at 06:00 Aug 2 AND Aug 2 is their Day Off,
+  // treat their effective "blocked until" as 23:59 Aug 2 so next shift
+  // cannot start until minRestHours after end of that day off.
+  for (let lb = 1; lb <= AUTO_LOOKBACK_DAYS; lb++) {
+    const lbDate = new Date(`${config.startDate}T00:00:00Z`);
+    lbDate.setUTCDate(lbDate.getUTCDate() - lb);
+    const lbDateStr = lbDate.toISOString().split("T")[0];
+
+    const oldProgram = data.programs?.find((p) => p.dateString === lbDateStr);
+
+    // Collect staff IDs who are on day off / leave on this lookback day
+    const dayOffStaffIds = new Set<string>();
+
+    // From offDuty[] records stored in the old program day
+    oldProgram?.offDuty?.forEach((od) => {
+      if (
+        ["Day off", "Annual leave", "Sick leave", "Lieu leave", "Roster leave"].includes(
+          od.type,
+        )
+      ) {
+        dayOffStaffIds.add(od.staffId);
+      }
+    });
+
+    // Also from the global leaveRequests list
+    data.leaveRequests?.forEach((lr) => {
+      if (lr.startDate <= lbDateStr && lr.endDate >= lbDateStr) {
+        dayOffStaffIds.add(lr.staffId);
+      }
+    });
+
+    // For each staff on day off: if their current lastEndTime falls on or before
+    // this day off date, extend it to 23:59 UTC of that day off.
+    dayOffStaffIds.forEach((staffId) => {
+      const endOfDayOff = new Date(`${lbDateStr}T23:59:00Z`);
+      const existing = staffLastEndTime.get(staffId);
+      if (!existing || endOfDayOff > existing) {
+        staffLastEndTime.set(staffId, endOfDayOff);
+      }
+    });
+  }
+
+  // Step C: Manual Rest Log (incomingDuties) — optional override.
+  // If a manual entry is LATER than what we auto-detected, it wins.
+  // Useful for staff coming from a different airport with no old program.
   if (data.incomingDuties) {
-    const prevDay = new Date(`${config.startDate}T12:00:00Z`);
+    const prevDay = new Date(`${config.startDate}T00:00:00Z`);
     prevDay.setUTCDate(prevDay.getUTCDate() - 1);
     const prevDayStr = prevDay.toISOString().split("T")[0];
 
     data.incomingDuties.forEach((d) => {
-      // Only consider incoming duties that actually match the day before the start date
-      if (d.date && d.date !== prevDayStr) {
-        return;
+      if (d.date && d.date !== prevDayStr) return;
+      const manualEnd = new Date(`${d.date || prevDayStr}T${d.shiftEndTime}:00Z`);
+      const existing = staffLastEndTime.get(d.staffId);
+      // Manual entry wins only if it represents a LATER end time
+      if (!existing || manualEnd > existing) {
+        staffLastEndTime.set(d.staffId, manualEnd);
       }
-      staffLastEndTime.set(
-        d.staffId,
-        new Date(`${d.date || prevDayStr}T${d.shiftEndTime}`),
-      );
     });
   }
   const staffWorkload = new Map<string, number>();
@@ -440,7 +522,10 @@ export const generateAIProgram = async (
 
     // Helper to find available staff for a specific shift
     const getAvailableStaff = (shift: any, roleKey?: string) => {
-      const shiftStart = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
+      // Build shift start as UTC to match how staffLastEndTime is seeded (fully UTC)
+      const [sph, spm] = shift.pickupTime.split(":").map(Number);
+      const shiftStart = new Date(`${shift.pickupDate}T00:00:00Z`);
+      shiftStart.setUTCHours(sph, spm, 0, 0);
       return data.staff
         .filter((s) => {
           // 1. Check Leave
@@ -518,13 +603,16 @@ export const generateAIProgram = async (
         });
     };
 
-    // Helper to calculate exact shift end date handle cross day
+    // Helper to calculate exact shift end time — fully UTC to avoid timezone bugs
     const getExactShiftEnd = (shift: any) => {
-      let [ph, pm] = shift.pickupTime.split(":").map(Number);
-      let [sh, sm] = shift.endTime.split(":").map(Number);
-      const endDt = new Date(`${shift.pickupDate}T${shift.pickupTime}`);
-      endDt.setHours(sh, sm, 0, 0);
-      if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
+      const [ph, pm] = shift.pickupTime.split(":").map(Number);
+      const [sh, sm] = shift.endTime.split(":").map(Number);
+      const endDt = new Date(`${shift.pickupDate}T00:00:00Z`);
+      endDt.setUTCHours(sh, sm, 0, 0);
+      // If end hour is before or equal to pickup hour, shift crosses midnight → +1 day
+      if (sh < ph || (sh === ph && sm < pm)) {
+        endDt.setUTCDate(endDt.getUTCDate() + 1);
+      }
       return endDt;
     };
 

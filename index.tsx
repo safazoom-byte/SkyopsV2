@@ -577,7 +577,7 @@ const App: React.FC = () => {
           flights,
           staff: eligibleStaff,
           shifts: activeShifts,
-          programs: [],
+          programs, // Pass full old programs so engine can auto-detect previous shifts & day-offs
           leaveRequests,
           incomingDuties,
           manualAssignments,
