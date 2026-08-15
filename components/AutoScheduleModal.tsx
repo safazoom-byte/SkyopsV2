@@ -33,69 +33,102 @@ export const AutoScheduleModal: React.FC<Props> = ({
   const [pickupRounding, setPickupRounding] = useState<number>(60); // round to nearest hour
   const [releaseRounding, setReleaseRounding] = useState<number>(30); // round up to nearest 30min
 
-  // Convert "HH:mm" to total minutes from midnight
-  const getMinutes = (timeStr?: string): number => {
-    if (!timeStr || timeStr.trim() === "" || timeStr.toUpperCase() === "NS") return -1;
+  // Helper to construct exact UTC Date for a flight time with cross-midnight support
+  const getFlightDateTime = (
+    baseDateStr: string,
+    timeStr?: string,
+    crossMidnightIfEarlierThan?: string
+  ): Date | null => {
+    if (!timeStr || timeStr.trim() === "" || timeStr.toUpperCase() === "NS" || timeStr.includes("---")) {
+      return null;
+    }
     const [h, m] = timeStr.split(":").map(Number);
-    if (isNaN(h)) return -1;
-    return h * 60 + (m || 0);
+    if (isNaN(h)) return null;
+
+    const dt = new Date(`${baseDateStr}T00:00:00Z`);
+    dt.setUTCHours(h, m || 0, 0, 0);
+
+    // If a turnaround flight has departure time earlier than arrival time on the same record, it spans midnight
+    if (crossMidnightIfEarlierThan) {
+      const [prevH, prevM] = crossMidnightIfEarlierThan.split(":").map(Number);
+      if (!isNaN(prevH)) {
+        if (h < prevH || (h === prevH && (m || 0) < (prevM || 0))) {
+          dt.setUTCDate(dt.getUTCDate() + 1);
+        }
+      }
+    }
+    return dt;
   };
 
-  // Convert total minutes to "HH:mm", handles >24h and negatives
-  const formatTime = (totalMins: number): string => {
-    let mins = totalMins % (24 * 60);
-    if (mins < 0) mins += 24 * 60;
-    const h = Math.floor(mins / 60);
-    const m = mins % 60;
-    return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+  // Convert Date object to "HH:mm" (UTC)
+  const formatTimeUTC = (d: Date): string => {
+    const h = d.getUTCHours().toString().padStart(2, "0");
+    const m = d.getUTCMinutes().toString().padStart(2, "0");
+    return `${h}:${m}`;
   };
 
-  // Returns the pickup time (in minutes from midnight) for a single flight based on its type
-  // This is the time staff need to be picked up / on duty for that specific flight
-  const getFlightPickupMins = (f: Flight): number | null => {
+  // Convert Date object to "YYYY-MM-DD" (UTC)
+  const formatDateUTC = (d: Date): string => {
+    return d.toISOString().split("T")[0];
+  };
+
+  // Calculates duty start (pickup) timestamp and duty end (release) timestamp for a single flight
+  const getFlightDutyTimestamps = (
+    f: Flight,
+    shiftPickupDate: string
+  ): { pickupDt: Date | null; releaseDt: Date | null } => {
+    const fDate = f.date || shiftPickupDate;
+
+    const arrTime = f.eta || f.sta;
+    const depTime = f.etd || f.std;
+
+    const arrDt = getFlightDateTime(fDate, arrTime);
+    const depDt = getFlightDateTime(
+      fDate,
+      depTime,
+      f.type === "Turnaround" && arrTime ? arrTime : undefined
+    );
+
+    let pickupDt: Date | null = null;
+    let releaseDt: Date | null = null;
+
+    // --- 1. PICKUP CALCULATION ---
     if (f.type === "Arrival") {
-      if (!rules.Arrival.enabled) return null;
-      const sta = getMinutes(f.eta || f.sta);
-      if (sta < 0) return null;
-      // Staff go to airport to handle arrival: X hours before STA
-      return sta + rules.Arrival.pickupOffsetHours * 60;
+      if (rules.Arrival.enabled && arrDt) {
+        // Staff go to airport before aircraft lands
+        pickupDt = new Date(arrDt.getTime() + rules.Arrival.pickupOffsetHours * 3600 * 1000);
+      }
+    } else if (f.type === "Departure") {
+      if (rules.Departure.enabled && depDt) {
+        // Counter opens before flight departs
+        pickupDt = new Date(depDt.getTime() + rules.Departure.pickupOffsetHours * 3600 * 1000);
+      }
+    } else {
+      // Turnaround
+      if (rules.Turnaround.enabled) {
+        const candidatePickups: number[] = [];
+        if (arrDt) {
+          candidatePickups.push(arrDt.getTime() + rules.Arrival.pickupOffsetHours * 3600 * 1000);
+        }
+        if (depDt) {
+          candidatePickups.push(depDt.getTime() + rules.Departure.pickupOffsetHours * 3600 * 1000);
+        }
+        if (candidatePickups.length > 0) {
+          pickupDt = new Date(Math.min(...candidatePickups));
+        }
+      }
     }
-    if (f.type === "Departure") {
-      if (!rules.Departure.enabled) return null;
-      const std = getMinutes(f.etd || f.std);
-      if (std < 0) return null;
-      // Counter opens for passengers: X hours before STD
-      return std + rules.Departure.pickupOffsetHours * 60;
-    }
-    if (f.type === "Turnaround") {
-      if (!rules.Turnaround.enabled) return null;
-      const times: number[] = [];
-      // Arrival side: staff go to handle incoming aircraft
-      const sta = getMinutes(f.eta || f.sta);
-      if (sta >= 0) times.push(sta + rules.Arrival.pickupOffsetHours * 60);
-      // Departure side: counter opens for passengers
-      const std = getMinutes(f.etd || f.std);
-      if (std >= 0) times.push(std + rules.Departure.pickupOffsetHours * 60);
-      if (times.length === 0) return null;
-      return Math.min(...times); // Earliest of the two sides
-    }
-    return null;
-  };
 
-  // Returns the release time (in minutes from midnight) for a single flight
-  // Release is always after the last departure (STD), or after last arrival if no departure
-  const getFlightReleaseMins = (f: Flight): number | null => {
-    // Departure or Turnaround: release after STD
-    const std = getMinutes(f.etd || f.std);
-    if (std >= 0) {
-      return std + rules.Departure.releaseOffsetHours * 60;
+    // --- 2. RELEASE CALCULATION ---
+    if (depDt) {
+      // Release after departure
+      releaseDt = new Date(depDt.getTime() + rules.Departure.releaseOffsetHours * 3600 * 1000);
+    } else if (arrDt) {
+      // Release after arrival (if arrival only)
+      releaseDt = new Date(arrDt.getTime() + rules.Arrival.releaseOffsetHours * 3600 * 1000);
     }
-    // Arrival-only: release after STA + buffer
-    const sta = getMinutes(f.eta || f.sta);
-    if (sta >= 0) {
-      return sta + rules.Arrival.releaseOffsetHours * 60;
-    }
-    return null;
+
+    return { pickupDt, releaseDt };
   };
 
   const applyRules = () => {
@@ -112,51 +145,58 @@ export const AutoScheduleModal: React.FC<Props> = ({
 
       if (shiftFlights.length === 0) return;
 
-      // --- STEP 1: Calculate per-flight pickup and release times ---
-      const pickupTimes = shiftFlights
-        .map(getFlightPickupMins)
-        .filter((t): t is number => t !== null);
+      // --- STEP 1: Calculate full UTC timestamps for every flight in the shift ---
+      const allPickups: Date[] = [];
+      const allReleases: Date[] = [];
 
-      const releaseTimes = shiftFlights
-        .map(getFlightReleaseMins)
-        .filter((t): t is number => t !== null);
+      shiftFlights.forEach((f) => {
+        const { pickupDt, releaseDt } = getFlightDutyTimestamps(f, s.pickupDate);
+        if (pickupDt) allPickups.push(pickupDt);
+        if (releaseDt) allReleases.push(releaseDt);
+      });
 
-      if (pickupTimes.length === 0 && releaseTimes.length === 0) return;
+      if (allPickups.length === 0 && allReleases.length === 0) return;
 
-      // --- STEP 2: Shift pickup = EARLIEST counter-open across all flights ---
-      let finalPickupMins = pickupTimes.length > 0 ? Math.min(...pickupTimes) : null;
-      // --- STEP 3: Shift release = LATEST release time across all flights ---
-      let finalReleaseMins = releaseTimes.length > 0 ? Math.max(...releaseTimes) : null;
+      // --- STEP 2: Find earliest pickup date/time and latest release date/time ---
+      let earliestPickup: Date | null =
+        allPickups.length > 0
+          ? new Date(Math.min(...allPickups.map((d) => d.getTime())))
+          : null;
 
-      // --- STEP 4: Apply rounding ---
+      let latestRelease: Date | null =
+        allReleases.length > 0
+          ? new Date(Math.max(...allReleases.map((d) => d.getTime())))
+          : null;
+
+      // --- STEP 3: Apply rounding across the full timeline ---
       if (enableRounding) {
-        if (finalPickupMins !== null && pickupRounding > 0) {
-          // Round DOWN for pickup (start earlier, not later)
-          finalPickupMins = Math.floor(finalPickupMins / pickupRounding) * pickupRounding;
+        if (earliestPickup && pickupRounding > 0) {
+          // Round DOWN pickup to give staff enough preparation time (e.g. 17:15 -> 17:00)
+          const mins = earliestPickup.getUTCHours() * 60 + earliestPickup.getUTCMinutes();
+          const roundedMins = Math.floor(mins / pickupRounding) * pickupRounding;
+          const diffMins = roundedMins - mins;
+          earliestPickup = new Date(earliestPickup.getTime() + diffMins * 60 * 1000);
         }
-        if (finalReleaseMins !== null && releaseRounding > 0) {
-          // Round UP for release (give more buffer, not less)
-          finalReleaseMins = Math.ceil(finalReleaseMins / releaseRounding) * releaseRounding;
+
+        if (latestRelease && releaseRounding > 0) {
+          // Round UP release to provide adequate post-flight buffer (e.g. 23:10 -> 23:30)
+          const mins = latestRelease.getUTCHours() * 60 + latestRelease.getUTCMinutes();
+          const roundedMins = Math.ceil(mins / releaseRounding) * releaseRounding;
+          const diffMins = roundedMins - mins;
+          latestRelease = new Date(latestRelease.getTime() + diffMins * 60 * 1000);
         }
       }
 
-      const pTime = finalPickupMins !== null ? formatTime(finalPickupMins) : s.pickupTime;
-      const eTime = finalReleaseMins !== null ? formatTime(finalReleaseMins) : s.endTime;
+      const pTime = earliestPickup ? formatTimeUTC(earliestPickup) : s.pickupTime;
+      const eTime = latestRelease ? formatTimeUTC(latestRelease) : s.endTime;
+      const eDate = latestRelease ? formatDateUTC(latestRelease) : s.endDate || s.pickupDate;
 
       const newShift = { ...s, roleCounts: { ...(s.roleCounts || {}) } };
 
       if (applyMode === "direct") {
         newShift.pickupTime = pTime;
         newShift.endTime = eTime;
-
-        // Handle overnight: if pickup > end, shift crosses midnight
-        if (newShift.pickupTime > newShift.endTime) {
-          const ed = new Date(newShift.pickupDate);
-          ed.setUTCDate(ed.getUTCDate() + 1);
-          newShift.endDate = ed.toISOString().split("T")[0];
-        } else {
-          newShift.endDate = newShift.pickupDate;
-        }
+        newShift.endDate = eDate;
 
         newShift.roleCounts["__ai_scheduled"] = 1;
         delete newShift.roleCounts["__manual_scheduled"];
@@ -165,17 +205,10 @@ export const AutoScheduleModal: React.FC<Props> = ({
         delete newShift.roleCounts["__ai_suggested_end_date"];
         delete newShift.roleCounts["__has_ai_suggestions"];
       } else {
-        // Store as suggestion — manager reviews before applying
+        // Store as suggestion — manager reviews and approves
         (newShift.roleCounts as any)["__ai_suggested_pickup"] = pTime;
         (newShift.roleCounts as any)["__ai_suggested_end"] = eTime;
-
-        let aiEndDate = s.pickupDate;
-        if (pTime > eTime) {
-          const ed = new Date(s.pickupDate);
-          ed.setUTCDate(ed.getUTCDate() + 1);
-          aiEndDate = ed.toISOString().split("T")[0];
-        }
-        (newShift.roleCounts as any)["__ai_suggested_end_date"] = aiEndDate;
+        (newShift.roleCounts as any)["__ai_suggested_end_date"] = eDate;
         (newShift.roleCounts as any)["__has_ai_suggestions"] = 1;
       }
 
@@ -192,23 +225,25 @@ export const AutoScheduleModal: React.FC<Props> = ({
     }));
   };
 
-  // Show a live preview of what the pickup/release would be for the rules
   const previewExample = (type: "Arrival" | "Departure" | "Turnaround") => {
     const r = rules[type];
     if (!r.enabled) return null;
     if (type === "Arrival") {
       const offset = r.pickupOffsetHours;
-      return `STA 19:00 → staff at ${formatTime(19 * 60 + offset * 60)}`;
+      const m = (19 * 60 + offset * 60 + 24 * 60) % (24 * 60);
+      const h = Math.floor(m / 60).toString().padStart(2, "0");
+      const mins = (m % 60).toString().padStart(2, "0");
+      return `STA 19:00 → staff at ${h}:${mins}`;
     }
     if (type === "Departure") {
       const offset = r.pickupOffsetHours;
-      return `STD 23:00 → counter at ${formatTime(23 * 60 + offset * 60)}`;
+      const m = (23 * 60 + offset * 60 + 24 * 60) % (24 * 60);
+      const h = Math.floor(m / 60).toString().padStart(2, "0");
+      const mins = (m % 60).toString().padStart(2, "0");
+      return `STD 23:00 → counter at ${h}:${mins}`;
     }
     if (type === "Turnaround") {
-      const arrOffset = rules.Arrival.pickupOffsetHours;
-      const depOffset = rules.Departure.pickupOffsetHours;
-      const pick = Math.min(19 * 60 + arrOffset * 60, 23 * 60 + depOffset * 60);
-      return `STA 19:00 / STD 23:00 → staff at ${formatTime(pick)}`;
+      return `Handles both arrival & departure across multi-day dates`;
     }
     return null;
   };
@@ -219,9 +254,9 @@ export const AutoScheduleModal: React.FC<Props> = ({
       icon: <Plane size={14} className="rotate-180" />,
       color: "sky",
       pickupLabel: "Staff Pickup Before STA",
-      pickupHint: "Hours before aircraft lands. e.g. −2 = staff go 2h before arrival",
+      pickupHint: "Hours before aircraft lands. e.g. −2 = staff arrive 2h before STA",
       releaseLabel: "Release After STA",
-      releaseHint: "Hours after arrival handling complete. e.g. 0.5 = 30 min after",
+      releaseHint: "Hours after arrival handling. e.g. 0.5 = 30 min buffer",
     },
     {
       type: "Departure" as const,
@@ -230,16 +265,16 @@ export const AutoScheduleModal: React.FC<Props> = ({
       pickupLabel: "Counter Open Before STD",
       pickupHint: "Hours before departure. e.g. −5 = counter opens 5h before STD",
       releaseLabel: "Release After STD",
-      releaseHint: "Hours after aircraft departs. e.g. 0.5 = 30 min after STD",
+      releaseHint: "Hours after aircraft departs. e.g. 0.5 = 30 min buffer",
     },
     {
       type: "Turnaround" as const,
       icon: <ArrowRight size={14} />,
       color: "violet",
-      pickupLabel: "Pickup Override (Hours)",
-      pickupHint: "Uses Arrival & Departure rules automatically. Override only if needed.",
-      releaseLabel: "Release After STD",
-      releaseHint: "Hours after last departure. Overrides departure rule for this flight.",
+      pickupLabel: "Turnaround Pickup Rule",
+      pickupHint: "Calculates earliest of arrival STA and departure STD rules.",
+      releaseLabel: "Turnaround Release Rule",
+      releaseHint: "Calculates release after last departure STD across dates.",
     },
   ];
 
@@ -269,7 +304,7 @@ export const AutoScheduleModal: React.FC<Props> = ({
                 Auto-Schedule Shifts
               </h2>
               <p className="text-[10px] sm:text-xs text-slate-500 font-medium">
-                Calculate pickup & release times from flight schedule
+                Multi-flight & cross-date aware scheduling engine
               </p>
             </div>
           </div>
@@ -283,20 +318,18 @@ export const AutoScheduleModal: React.FC<Props> = ({
 
         <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
 
-          {/* How It Works note */}
+          {/* How It Works banner */}
           <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-xs text-indigo-800 space-y-1.5">
-            <p className="font-black uppercase tracking-wider text-indigo-600 text-[10px]">How It Works</p>
+            <p className="font-black uppercase tracking-wider text-indigo-600 text-[10px]">
+              Cross-Date & Multi-Flight Calculation
+            </p>
             <p>
-              For each shift, the engine checks <strong>every assigned flight</strong> individually,
-              calculates when staff must be on duty, then sets:
+              The engine checks <strong>every flight date and time</strong> in the shift. Even if flights span across midnight (e.g. Flight 1 at 23:00 on Day 1, Flight 2 at 03:00 on Day 2):
             </p>
             <ul className="list-disc list-inside space-y-0.5 text-[11px] font-medium">
-              <li><strong>Pickup</strong> = earliest duty time across all flights in the shift</li>
-              <li><strong>Release</strong> = latest departure time + release buffer</li>
+              <li><strong>Pickup</strong> = Earliest duty start across all flight dates</li>
+              <li><strong>Release & End Date</strong> = Latest departure time + buffer (accurately advances <code>endDate</code> across midnight)</li>
             </ul>
-            <p className="text-[11px] text-indigo-600 font-semibold mt-1">
-              Example: Arrival STA 19:00 (−2h = 17:00) + Departure STD 23:00 (−5h = 18:00) → Shift pickup = <strong>17:00</strong>
-            </p>
           </div>
 
           {/* Flight Type Rules */}
@@ -397,7 +430,7 @@ export const AutoScheduleModal: React.FC<Props> = ({
               </label>
             </div>
             <p className="text-[11px] text-slate-500 mb-3 leading-normal">
-              Rounds pickup <strong>down</strong> (start earlier) and release <strong>up</strong> (end later) for cleaner shift times.
+              Rounds pickup <strong>down</strong> (start earlier) and release <strong>up</strong> (end later) across dates.
             </p>
             <div className={`grid grid-cols-2 gap-3 ${!enableRounding ? "opacity-40 pointer-events-none" : ""}`}>
               <div>
