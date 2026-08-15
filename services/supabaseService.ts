@@ -723,8 +723,14 @@ export const db = {
 
         const { error: insError } = await client.from("programs").upsert(
           programs.map((p) => {
+            const cleanOffDuty = (p.offDuty || []).filter(
+              (od: any) =>
+                od.staffId !== "NOTES_HACK" &&
+                od.staffId !== "DRIVERS_HACK" &&
+                od.staffId !== "SETTINGS_HACK"
+            );
             const offDutyToSave: any[] = [
-                ...(p.offDuty || []),
+                ...cleanOffDuty,
                 { staffId: "NOTES_HACK", type: "NIL", data: p.notes || {} },
                 { staffId: "DRIVERS_HACK", type: "NIL", data: p.shiftDrivers || {} }
             ];

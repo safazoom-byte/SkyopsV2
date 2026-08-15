@@ -8,7 +8,10 @@ import {
   IncomingDuty,
   Skill,
   ProgramVersion,
-  ManualAssignment,  isStaffActiveOnDate, isStaffActiveInPeriod,
+  ManualAssignment,
+  PeriodSettings,
+  isStaffActiveOnDate,
+  isStaffActiveInPeriod,
 } from "../types";
 
 const getStaffRoleRating = (st: Staff | undefined | null, role: string) => {
@@ -115,8 +118,6 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [tempRev, setTempRev] = useState("");
   const [tempMinOff, setTempMinOff] = useState("23");
   const [tempMaxOff, setTempMaxOff] = useState("27");
-  const [tempDefaultPrep, setTempDefaultPrep] = useState("");
-  const [tempDefaultRev, setTempDefaultRev] = useState("");
   const [tempHideDrivers, setTempHideDrivers] = useState(false);
   const [tempHideLabour, setTempHideLabour] = useState(false);
   const [tempHideSecurity, setTempHideSecurity] = useState(false);
@@ -148,7 +149,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     const savedHideSecurity = localStorage.getItem("hideSecurity_global") === "true";
     const savedHideAccountants = localStorage.getItem("hideAccountants_global") === "true";
 
-    const dbSettings = programs.find((p) => p.periodSettings !== undefined)?.periodSettings;
+    const activeRangePrograms = programs.filter(
+      (p) => p.dateString && p.dateString >= startDate && p.dateString <= endDate
+    );
+    const dbSettings = activeRangePrograms.find((p) => p.periodSettings !== undefined)?.periodSettings;
 
     let activePrep = "";
     let activeRev = "";
@@ -156,33 +160,22 @@ export const ProgramDisplay: React.FC<Props> = ({
     let activeMax = 27;
 
     if (dbSettings) {
-      activePrep = dbSettings.preparedBy !== undefined ? dbSettings.preparedBy : (userProfile?.preparedBy || "");
-      activeRev = dbSettings.revisedBy !== undefined ? dbSettings.revisedBy : (userProfile?.revisedBy || "");
-      activeMin = dbSettings.minOffDayHours !== undefined ? dbSettings.minOffDayHours : 23;
-      activeMax = dbSettings.maxOffDayHours !== undefined ? dbSettings.maxOffDayHours : 27;
+      activePrep = dbSettings.preparedBy ?? (savedPrep !== null ? savedPrep : "");
+      activeRev = dbSettings.revisedBy ?? (savedRev !== null ? savedRev : "");
+      activeMin = dbSettings.minOffDayHours !== undefined ? dbSettings.minOffDayHours : (savedMin !== null ? Number(savedMin) : 23);
+      activeMax = dbSettings.maxOffDayHours !== undefined ? dbSettings.maxOffDayHours : (savedMax !== null ? Number(savedMax) : 27);
     } else {
       if (savedPrep !== null) {
         activePrep = savedPrep;
-      } else {
-        activePrep = userProfile?.preparedBy || "";
       }
-
       if (savedRev !== null) {
         activeRev = savedRev;
-      } else {
-        activeRev = userProfile?.revisedBy || "";
       }
-
       if (savedMin !== null) {
         activeMin = Number(savedMin);
-      } else {
-        activeMin = 23;
       }
-
       if (savedMax !== null) {
         activeMax = Number(savedMax);
-      } else {
-        activeMax = 27;
       }
     }
 
@@ -194,26 +187,13 @@ export const ProgramDisplay: React.FC<Props> = ({
     setHideLabourOffDuty(savedHideLabour);
     setHideSecurityOffDuty(savedHideSecurity);
     setHideAccountantsOffDuty(savedHideAccountants);
-
-    setTempPrep(activePrep);
-    setTempRev(activeRev);
-    setTempMinOff(activeMin.toString());
-    setTempMaxOff(activeMax.toString());
-    setTempDefaultPrep(userProfile?.preparedBy || "");
-    setTempDefaultRev(userProfile?.revisedBy || "");
-    setTempHideDrivers(savedHideDrivers);
-    setTempHideLabour(savedHideLabour);
-    setTempHideSecurity(savedHideSecurity);
-    setTempHideAccountants(savedHideAccountants);
-  }, [startDate, endDate, userProfile, programs]);
+  }, [startDate, endDate, programs]);
 
   const handleSaveSettings = async (
     prep: string,
     rev: string,
     minH: number,
-    maxH: number,
-    defaultPrepVal?: string,
-    defaultRevVal?: string
+    maxH: number
   ) => {
     const keyPrefix = `${startDate}_${endDate}`;
     localStorage.setItem(`prep_${keyPrefix}`, prep);
@@ -234,43 +214,57 @@ export const ProgramDisplay: React.FC<Props> = ({
     setHideSecurityOffDuty(tempHideSecurity);
     setHideAccountantsOffDuty(tempHideAccountants);
 
-    // 1. Update default signatures in the user profiles database table
-    if (userProfile && (defaultPrepVal !== undefined || defaultRevVal !== undefined)) {
-      const updatedProfile = {
-        ...userProfile,
-        preparedBy: defaultPrepVal !== undefined ? defaultPrepVal : userProfile.preparedBy,
-        revisedBy: defaultRevVal !== undefined ? defaultRevVal : userProfile.revisedBy,
-      };
-      try {
-        await db.updateUserProfile(updatedProfile);
-        setUserProfile(updatedProfile);
-      } catch (err) {
-        console.error("Error updating default signatures in DB profile:", err);
-      }
+    const newPeriodSettings: PeriodSettings = {
+      preparedBy: prep,
+      revisedBy: rev,
+      minOffDayHours: minH,
+      maxOffDayHours: maxH,
+      hideDriversOffDuty: tempHideDrivers,
+      hideLabourOffDuty: tempHideLabour,
+      hideSecurityOffDuty: tempHideSecurity,
+      hideAccountantsOffDuty: tempHideAccountants,
+    };
+
+    // Calculate all date strings in [startDate...endDate]
+    const affectedDates: string[] = [];
+    const curr = new Date(startDate);
+    const end = new Date(endDate);
+    while (curr <= end) {
+      const y = curr.getFullYear();
+      const m = String(curr.getMonth() + 1).padStart(2, '0');
+      const d = String(curr.getDate()).padStart(2, '0');
+      affectedDates.push(`${y}-${m}-${d}`);
+      curr.setDate(curr.getDate() + 1);
     }
 
-    // 2. Update period-specific settings in the programs database table
-    const updatedPrograms = programs.map((p) => {
-      if (p.dateString && p.dateString >= startDate && p.dateString <= endDate) {
-        return {
-          ...p,
-          periodSettings: {
-            preparedBy: prep,
-            revisedBy: rev,
-            minOffDayHours: minH,
-            maxOffDayHours: maxH,
-            hideDriversOffDuty: tempHideDrivers,
-            hideLabourOffDuty: tempHideLabour,
-            hideSecurityOffDuty: tempHideSecurity,
-            hideAccountantsOffDuty: tempHideAccountants,
-          },
-        };
-      }
-      return p;
+    const dateMap = new Map<string, DailyProgram>();
+    programs.forEach((p) => {
+      if (p.dateString) dateMap.set(p.dateString, { ...p });
     });
 
+    affectedDates.forEach((dStr) => {
+      const existing = dateMap.get(dStr);
+      if (existing) {
+        existing.periodSettings = newPeriodSettings;
+      } else {
+        dateMap.set(dStr, {
+          day: new Date(dStr).getDay() + 1,
+          dateString: dStr,
+          assignments: [],
+          offDuty: [],
+          notes: {},
+          shiftDrivers: {},
+          periodSettings: newPeriodSettings,
+        });
+      }
+    });
+
+    const updatedPrograms = Array.from(dateMap.values());
+
     try {
-      await onUpdatePrograms(updatedPrograms);
+      if (onUpdatePrograms) {
+        await onUpdatePrograms(updatedPrograms, affectedDates);
+      }
     } catch (err) {
       console.error("Error saving program-period settings to DB:", err);
     }
@@ -1925,8 +1919,8 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
       
       sheet.addRow([]);
-      const fRow1 = sheet.addRow(["Prepared By: " + (periodPreparedBy || profile?.preparedBy || "")]);
-      const fRow2 = sheet.addRow(["Revised By: " + (periodRevisedBy || profile?.revisedBy || "")]);
+      const fRow1 = sheet.addRow(["Prepared By: " + (periodPreparedBy || "")]);
+      const fRow2 = sheet.addRow(["Revised By: " + (periodRevisedBy || "")]);
       
       fRow1.getCell(1).font = { bold: true, size: 10 };
       fRow2.getCell(1).font = { bold: true, size: 10 };
@@ -3377,8 +3371,10 @@ export const ProgramDisplay: React.FC<Props> = ({
               setTempRev(periodRevisedBy);
               setTempMinOff(minOffDayHours.toString());
               setTempMaxOff(maxOffDayHours.toString());
-              setTempDefaultPrep(userProfile?.preparedBy || "");
-              setTempDefaultRev(userProfile?.revisedBy || "");
+              setTempHideDrivers(hideDriversOffDuty);
+              setTempHideLabour(hideLabourOffDuty);
+              setTempHideSecurity(hideSecurityOffDuty);
+              setTempHideAccountants(hideAccountantsOffDuty);
               setShowSettingsModal(true);
             }}
             className="px-4 md:px-8 py-4 md:py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95"
@@ -4971,39 +4967,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400 leading-normal">
-                  These names will be printed at the bottom of the exported Staff Excel sheet for this specific period. If blank, it will use the default signature from your user profile below.
-                </p>
-              </div>
-
-              {/* Default Signatures (User Profile) Section */}
-              <div className="space-y-4">
-                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
-                  Default Signatures (User Profile)
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Default Prepared By</label>
-                    <input
-                      type="text"
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
-                      placeholder="e.g. Operation Control Center"
-                      value={tempDefaultPrep}
-                      onChange={(e) => setTempDefaultPrep(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Default Revised By</label>
-                    <input
-                      type="text"
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20 transition-all font-bold"
-                      placeholder="e.g. Duty Manager"
-                      value={tempDefaultRev}
-                      onChange={(e) => setTempDefaultRev(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 leading-normal">
-                  These values are saved to your user profile in the database and will be used as the default signatures if no period-specific overrides are entered above.
+                  These names will be printed at the bottom of the exported Staff Excel sheet for this specific period.
                 </p>
               </div>
 
@@ -5114,7 +5078,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 onClick={() => {
                   const minVal = parseFloat(tempMinOff) || 23;
                   const maxVal = parseFloat(tempMaxOff) || 27;
-                  handleSaveSettings(tempPrep, tempRev, minVal, maxVal, tempDefaultPrep, tempDefaultRev);
+                  handleSaveSettings(tempPrep, tempRev, minVal, maxVal);
                 }}
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm shadow-md shadow-indigo-600/10"
               >

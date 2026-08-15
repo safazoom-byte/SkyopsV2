@@ -121,6 +121,17 @@ export interface OffDutyRecord {
   type: LeaveType;
 }
 
+export interface PeriodSettings {
+  preparedBy?: string;
+  revisedBy?: string;
+  minOffDayHours?: number;
+  maxOffDayHours?: number;
+  hideDriversOffDuty?: boolean;
+  hideLabourOffDuty?: boolean;
+  hideSecurityOffDuty?: boolean;
+  hideAccountantsOffDuty?: boolean;
+}
+
 export interface DailyProgram {
   day: number;
   dateString?: string;
@@ -128,16 +139,7 @@ export interface DailyProgram {
   offDuty?: OffDutyRecord[];
   notes?: Record<string, string>;
   shiftDrivers?: Record<string, string>;
-  periodSettings?: {
-    preparedBy?: string;
-    revisedBy?: string;
-    minOffDayHours?: number;
-    maxOffDayHours?: number;
-    hideDriversOffDuty?: boolean;
-    hideLabourOffDuty?: boolean;
-    hideSecurityOffDuty?: boolean;
-    hideAccountantsOffDuty?: boolean;
-  };
+  periodSettings?: PeriodSettings;
 }
 
 export interface ProgramVersion {
