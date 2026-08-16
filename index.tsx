@@ -1615,18 +1615,17 @@ const App: React.FC = () => {
 
                       return (
                         <div className="space-y-6">
-                          {/* 1. Absence Type Selector (Roster leave removed) */}
+                          {/* 1. Absence Type Selector (Day off, Annual leave, Sick leave) */}
                           <div>
                             <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-1.5">
                               <Briefcase size={11} className="text-indigo-500" />
                               Absence Type
                             </label>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <div className="grid grid-cols-3 gap-2.5">
                               {[
                                 { type: "Day off" as LeaveType, label: "Day Off", icon: "🏖️", selectedBg: "bg-slate-900 text-white border-slate-900 shadow-md" },
                                 { type: "Annual leave" as LeaveType, label: "Annual Leave", icon: "🌴", selectedBg: "bg-emerald-600 text-white border-emerald-600 shadow-md" },
                                 { type: "Sick leave" as LeaveType, label: "Sick Leave", icon: "🤒", selectedBg: "bg-rose-600 text-white border-rose-600 shadow-md" },
-                                { type: "Lieu leave" as LeaveType, label: "Lieu Leave", icon: "⏱️", selectedBg: "bg-amber-600 text-white border-amber-600 shadow-md" },
                               ].map((item) => {
                                 const isSelected = quickLeaveType === item.type;
                                 return (
