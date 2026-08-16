@@ -241,16 +241,12 @@ const App: React.FC = () => {
 
   // Leave Registry Logic (Off-Duty)
   const [quickLeaveStaffIds, setQuickLeaveStaffIds] = useState<string[]>([]);
-  const [quickLeaveStartDate, setQuickLeaveStartDate] = useState(
-    () => new Date().toISOString().split("T")[0],
-  );
-  const [quickLeaveEndDate, setQuickLeaveEndDate] = useState(
-    () => new Date().toISOString().split("T")[0],
-  );
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>("Day off");
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
-  // Multi-entry queue: holds {date, type} pairs staged before final save
-  const [quickLeaveQueue, setQuickLeaveQueue] = useState<Array<{ id: string; date: string; type: LeaveType }>>([]); 
+  const [quickLeaveSelectedDates, setQuickLeaveSelectedDates] = useState<string[]>([]);
+  const [quickLeaveCustomDate, setQuickLeaveCustomDate] = useState("");
+  const [quickLeaveRangeFrom, setQuickLeaveRangeFrom] = useState("");
+  const [quickLeaveRangeTo, setQuickLeaveRangeTo] = useState(""); 
 
   const nonHiddenShifts = shifts.filter(s => !s.isHidden);
   // --- PREFERENCE PERSISTENCE EFFECTS ---
@@ -931,6 +927,25 @@ const App: React.FC = () => {
     }
   };
 
+  const toggleQuickLeaveDate = (dateStr: string) => {
+    setQuickLeaveSelectedDates((prev) =>
+      prev.includes(dateStr) ? prev.filter((d) => d !== dateStr) : [...prev, dateStr]
+    );
+  };
+
+  const addQuickLeaveDateRange = (fromStr: string, toStr: string) => {
+    if (!fromStr || !toStr) return;
+    const startMs = new Date(`${fromStr}T00:00:00Z`).getTime();
+    const endMs = new Date(`${toStr}T00:00:00Z`).getTime();
+    if (isNaN(startMs) || isNaN(endMs) || startMs > endMs) return;
+    const dayMs = 24 * 60 * 60 * 1000;
+    const rangeDates: string[] = [];
+    for (let ms = startMs; ms <= endMs; ms += dayMs) {
+      rangeDates.push(new Date(ms).toISOString().split("T")[0]);
+    }
+    setQuickLeaveSelectedDates((prev) => Array.from(new Set([...prev, ...rangeDates])));
+  };
+
   const addQuickLeave = async () => {
     // Process input text on button click
     let finalIds = [...quickLeaveStaffIds];
@@ -949,49 +964,54 @@ const App: React.FC = () => {
     }
     finalIds = Array.from(new Set(finalIds));
 
-    if (finalIds.length === 0) return;
+    if (finalIds.length === 0) {
+      alert("Please select staff members first.");
+      return;
+    }
 
-    // Build entries: use queue if it has items, otherwise single date range
-    const entriesToAdd: Array<{ date: string; endDate: string; type: LeaveType }> =
-      quickLeaveQueue.length > 0
-        ? quickLeaveQueue.map(q => ({ date: q.date, endDate: q.date, type: q.type }))
-        : [{ date: quickLeaveStartDate, endDate: quickLeaveEndDate, type: quickLeaveType }];
+    const datesToApply = Array.from(new Set(quickLeaveSelectedDates)).filter(Boolean).sort();
+    if (datesToApply.length === 0) {
+      alert("Please select at least one date.");
+      return;
+    }
 
-    // Validation: Check for overlapping leaves across all queued entries
+    // Validation: Check for overlapping leaves across all selected dates
     const overlappingStaff: string[] = [];
     finalIds.forEach((id) => {
-      for (const entry of entriesToAdd) {
+      for (const dateStr of datesToApply) {
         const hasOverlap = leaveRequests.some(
           (l) =>
             l.staffId === id &&
-            l.startDate <= entry.endDate &&
-            l.endDate >= entry.date,
+            l.startDate <= dateStr &&
+            l.endDate >= dateStr,
         );
         if (hasOverlap) {
           const st = staff.find((s) => s.id === id);
-          if (st && !overlappingStaff.includes(st.initials)) overlappingStaff.push(st.initials);
-          break;
+          if (st) {
+            const entryStr = `${st.initials} (${dateStr})`;
+            if (!overlappingStaff.includes(entryStr)) overlappingStaff.push(entryStr);
+          }
         }
       }
     });
 
     if (overlappingStaff.length > 0) {
       alert(
-        `Cannot add leave. The following staff already have overlapping leave records: ${overlappingStaff.join(", ")}`,
+        `Cannot add absence records. The following staff already have overlapping leave records:\n${overlappingStaff.join(", ")}`,
       );
       return;
     }
 
-    // Build leave requests: one LeaveRequest per staff per queued entry
+    // Build leave requests: one LeaveRequest per staff per selected date
     const newLeaves: LeaveRequest[] = [];
     for (const sid of finalIds) {
-      for (const entry of entriesToAdd) {
+      for (const dateStr of datesToApply) {
         newLeaves.push({
           id: crypto.randomUUID(),
           staffId: sid,
-          startDate: entry.date,
-          endDate: entry.endDate,
-          type: entry.type,
+          startDate: dateStr,
+          endDate: dateStr,
+          type: quickLeaveType,
         });
       }
     }
@@ -1003,33 +1023,12 @@ const App: React.FC = () => {
         "CREATE",
         "LEAVE",
         "BULK",
-        `Added ${newLeaves.length} absence entries`,
+        `Added ${newLeaves.length} ${quickLeaveType} entries`,
       );
     }
 
-    setQuickLeaveStaffIds([]);
-    setQuickLeaveQueue([]);
-    setNotification(`${newLeaves.length} Absence Entries Added`);
-  };
-
-  // Add a single date+type entry to the pending queue (does not save yet)
-  const addToQuickLeaveQueue = () => {
-    if (!quickLeaveStartDate) return;
-    // Allow adding each date individually — from-to range adds one entry per day
-    const startMs = new Date(`${quickLeaveStartDate}T00:00:00Z`).getTime();
-    const endMs = new Date(`${quickLeaveEndDate}T00:00:00Z`).getTime();
-    const dayMs = 24 * 60 * 60 * 1000;
-    const newEntries: Array<{ id: string; date: string; type: LeaveType }> = [];
-    for (let ms = startMs; ms <= endMs; ms += dayMs) {
-      const dateStr = new Date(ms).toISOString().split("T")[0];
-      // Skip duplicates already in queue
-      if (!quickLeaveQueue.some(q => q.date === dateStr && q.type === quickLeaveType)) {
-        newEntries.push({ id: crypto.randomUUID(), date: dateStr, type: quickLeaveType });
-      }
-    }
-    if (newEntries.length > 0) {
-      setQuickLeaveQueue(prev => [...prev, ...newEntries]);
-    }
+    setQuickLeaveSelectedDates([]);
+    setNotification(`Added ${newLeaves.length} ${quickLeaveType} entries successfully`);
   };
 
   const deleteIncomingDuty = async (id: string) => {
@@ -1595,177 +1594,240 @@ const App: React.FC = () => {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          From
-                        </label>
-                        <input
-                          type="date"
-                          className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none"
-                          value={quickLeaveStartDate}
-                          onChange={(e) => {
-                            setQuickLeaveStartDate(e.target.value);
-                            if (e.target.value > quickLeaveEndDate)
-                              setQuickLeaveEndDate(e.target.value);
-                          }}
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          To
-                        </label>
-                        <input
-                          type="date"
-                          className="h-[56px] w-full px-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none"
-                          value={quickLeaveEndDate}
-                          min={quickLeaveStartDate}
-                          onChange={(e) => setQuickLeaveEndDate(e.target.value)}
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                          Type
-                        </label>
-                        <select
-                          className="h-[56px] w-full bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm px-4 outline-none"
-                          value={quickLeaveType}
-                          onChange={(e) =>
-                            setQuickLeaveType(e.target.value as LeaveType)
-                          }
-                        >
-                          <option value="Day off">Day off</option>
-                          <option value="Annual leave">Annual leave</option>
-                          <option value="Sick leave">Sick leave</option>
-                          <option value="Lieu leave">Lieu leave</option>
-                          <option value="Roster leave">Roster leave</option>
-                        </select>
-                      </div>
-                      <div className="flex flex-col gap-1 justify-end">
-                        <button
-                          onClick={addToQuickLeaveQueue}
-                          disabled={!quickLeaveStartDate}
-                          className="h-[56px] bg-slate-100 border border-slate-200 text-slate-700 rounded-2xl font-black uppercase italic tracking-widest hover:bg-slate-200 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
-                        >
-                          <Plus size={16} /> + Queue
-                        </button>
-                      </div>
-                    </div>
+                    {(() => {
+                      const quickLeavePeriodDates: string[] = [];
+                      if (startDate) {
+                        const start = new Date(`${startDate}T12:00:00Z`);
+                        const days = programDuration || 7;
+                        for (let i = 0; i < days; i++) {
+                          const d = new Date(start);
+                          d.setUTCDate(start.getUTCDate() + i);
+                          quickLeavePeriodDates.push(d.toISOString().split("T")[0]);
+                        }
+                      }
 
-                    {/* Multi-entry queue — shows staged date+type entries */}
-                    {quickLeaveQueue.length > 0 && (
-                      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">
-                            Queued — {quickLeaveQueue.length} entr{quickLeaveQueue.length > 1 ? "ies" : "y"} pending
-                          </span>
-                          <button
-                            onClick={() => setQuickLeaveQueue([])}
-                            className="text-[9px] font-black text-indigo-400 hover:text-indigo-700 uppercase tracking-wider"
-                          >
-                            Clear All
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {quickLeaveQueue.map((entry) => {
-                            const typeColor =
-                              entry.type === "Annual leave" ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                              entry.type === "Sick leave"   ? "bg-rose-100 text-rose-700 border-rose-200" :
-                              entry.type === "Lieu leave"   ? "bg-amber-100 text-amber-700 border-amber-200" :
-                              entry.type === "Roster leave" ? "bg-violet-100 text-violet-700 border-violet-200" :
-                                                              "bg-slate-100 text-slate-700 border-slate-200";
-                            return (
-                              <div
-                                key={entry.id}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[10px] font-black ${typeColor}`}
-                              >
-                                <span>{entry.date}</span>
-                                <span className="opacity-60 font-medium text-[9px]">{entry.type}</span>
+                      const formatShortDate = (dStr: string) => {
+                        const d = new Date(`${dStr}T12:00:00Z`);
+                        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                        return `${dayNames[d.getUTCDay()]} ${d.getUTCDate()} ${monthNames[d.getUTCMonth()]}`;
+                      };
+
+                      return (
+                        <div className="space-y-6">
+                          {/* 1. Absence Type Selector (Roster leave removed) */}
+                          <div>
+                            <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest mb-2 block flex items-center gap-1.5">
+                              <Briefcase size={11} className="text-indigo-500" />
+                              Absence Type
+                            </label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {[
+                                { type: "Day off" as LeaveType, label: "Day Off", icon: "🏖️", selectedBg: "bg-slate-900 text-white border-slate-900 shadow-md" },
+                                { type: "Annual leave" as LeaveType, label: "Annual Leave", icon: "🌴", selectedBg: "bg-emerald-600 text-white border-emerald-600 shadow-md" },
+                                { type: "Sick leave" as LeaveType, label: "Sick Leave", icon: "🤒", selectedBg: "bg-rose-600 text-white border-rose-600 shadow-md" },
+                                { type: "Lieu leave" as LeaveType, label: "Lieu Leave", icon: "⏱️", selectedBg: "bg-amber-600 text-white border-amber-600 shadow-md" },
+                              ].map((item) => {
+                                const isSelected = quickLeaveType === item.type;
+                                return (
+                                  <button
+                                    key={item.type}
+                                    type="button"
+                                    onClick={() => setQuickLeaveType(item.type)}
+                                    className={`px-3 py-3 rounded-2xl border text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all ${
+                                      isSelected
+                                        ? item.selectedBg
+                                        : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300"
+                                    }`}
+                                  >
+                                    <span className="text-sm">{item.icon}</span>
+                                    <span>{item.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 2. Multi-Date Selector */}
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5">
+                                <CalendarIcon size={11} className="text-indigo-500" />
+                                Select Dates ({quickLeaveSelectedDates.length} selected)
+                              </label>
+                              <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => setQuickLeaveQueue(prev => prev.filter(q => q.id !== entry.id))}
-                                  className="opacity-60 hover:opacity-100 transition-opacity"
+                                  type="button"
+                                  onClick={() => setQuickLeaveSelectedDates(quickLeavePeriodDates)}
+                                  className="text-[9px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-wider"
                                 >
-                                  <X size={10} />
+                                  Select All Period
+                                </button>
+                                <span className="text-slate-300">|</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setQuickLeaveSelectedDates([])}
+                                  className="text-[9px] font-black text-slate-400 hover:text-slate-600 uppercase tracking-wider"
+                                >
+                                  Clear
                                 </button>
                               </div>
-                            );
-                          })}
-                        </div>
-                        <button
-                          onClick={addQuickLeave}
-                          disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()}
-                          className="w-full h-[48px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
-                        >
-                          <Check size={16} /> Save {quickLeaveQueue.length} Entr{quickLeaveQueue.length > 1 ? "ies" : "y"} for Selected Staff
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Fallback single-entry save when queue is empty */}
-                    {quickLeaveQueue.length === 0 && (
-                      <button
-                        onClick={addQuickLeave}
-                        disabled={
-                          quickLeaveStaffIds.length === 0 &&
-                          !quickLeaveSearchTerm.trim()
-                        }
-                        className="w-full h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
-                      >
-                        <Plus size={16} /> Add Group Log
-                      </button>
-                    )}
-
-                    {/* Feedback List */}
-                    <div className="pt-4 border-t border-slate-50">
-                      <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                        Absences overlapping {quickLeaveStartDate} to{" "}
-                        {quickLeaveEndDate}
-                      </h5>
-                      <div className="flex flex-wrap gap-2">
-                        {leaveRequests.filter(
-                          (l) =>
-                            l.startDate <= quickLeaveEndDate &&
-                            l.endDate >= quickLeaveStartDate,
-                        ).length === 0 && (
-                          <span className="text-[9px] italic text-slate-300">
-                            No entries yet.
-                          </span>
-                        )}
-                        {leaveRequests
-                          .filter(
-                            (l) =>
-                              l.startDate <= quickLeaveEndDate &&
-                              l.endDate >= quickLeaveStartDate,
-                          )
-                          .map((l) => (
-                            <div
-                              key={l.id}
-                              className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in"
-                            >
-                              <span className="text-[10px] font-black text-indigo-700 uppercase">
-                                {
-                                  staff.find((s) => s.id === l.staffId)
-                                    ?.initials
-                                }
-                              </span>
-                              <span className="text-[10px] font-bold text-indigo-500">
-                                {l.type}
-                              </span>
-                              <span className="text-[8px] font-bold text-indigo-400 bg-indigo-100 px-1 rounded">
-                                {l.startDate === l.endDate
-                                  ? l.startDate
-                                  : `${l.startDate} - ${l.endDate}`}
-                              </span>
-                              <button
-                                onClick={() => deleteLeaveRequest(l.id)}
-                                className="text-indigo-400 hover:text-indigo-600"
-                              >
-                                <X size={10} />
-                              </button>
                             </div>
-                          ))}
-                      </div>
-                    </div>
+
+                            {/* Clickable Date Pills for Current Period */}
+                            <div className="flex flex-wrap gap-2 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                              {quickLeavePeriodDates.map((dateStr) => {
+                                const isSelected = quickLeaveSelectedDates.includes(dateStr);
+                                return (
+                                  <button
+                                    key={dateStr}
+                                    type="button"
+                                    onClick={() => toggleQuickLeaveDate(dateStr)}
+                                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                                      isSelected
+                                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-black scale-[1.03]"
+                                        : "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200"
+                                    }`}
+                                  >
+                                    <span className={`w-2 h-2 rounded-full ${isSelected ? "bg-white animate-pulse" : "bg-slate-300"}`} />
+                                    {formatShortDate(dateStr)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Additional Date Picker & Range Selector */}
+                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">Pick Specific Date:</span>
+                                <input
+                                  type="date"
+                                  className="bg-transparent text-xs font-bold text-slate-800 outline-none flex-1"
+                                  value={quickLeaveCustomDate}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setQuickLeaveCustomDate(val);
+                                    if (val && !quickLeaveSelectedDates.includes(val)) {
+                                      setQuickLeaveSelectedDates((prev) => [...prev, val]);
+                                    }
+                                  }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">Range:</span>
+                                <input
+                                  type="date"
+                                  className="bg-transparent text-xs font-bold text-slate-800 outline-none w-28"
+                                  value={quickLeaveRangeFrom}
+                                  onChange={(e) => setQuickLeaveRangeFrom(e.target.value)}
+                                />
+                                <span className="text-slate-400 text-xs">→</span>
+                                <input
+                                  type="date"
+                                  className="bg-transparent text-xs font-bold text-slate-800 outline-none w-28"
+                                  value={quickLeaveRangeTo}
+                                  onChange={(e) => setQuickLeaveRangeTo(e.target.value)}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => addQuickLeaveDateRange(quickLeaveRangeFrom, quickLeaveRangeTo)}
+                                  disabled={!quickLeaveRangeFrom || !quickLeaveRangeTo}
+                                  className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg text-[10px] font-black uppercase disabled:opacity-40 whitespace-nowrap ml-auto"
+                                >
+                                  + Select
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3. Selected Dates Preview Chips */}
+                          {quickLeaveSelectedDates.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl">
+                              <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mr-1">
+                                Selected ({quickLeaveSelectedDates.length}):
+                              </span>
+                              {quickLeaveSelectedDates.slice().sort().map((dStr) => (
+                                <span
+                                  key={dStr}
+                                  className="px-2.5 py-1 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-[10px] font-bold flex items-center gap-1.5 shadow-sm"
+                                >
+                                  {dStr}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleQuickLeaveDate(dStr)}
+                                    className="text-indigo-400 hover:text-indigo-700 ml-0.5"
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* 4. Action Button */}
+                          <button
+                            type="button"
+                            onClick={addQuickLeave}
+                            disabled={
+                              (quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()) ||
+                              quickLeaveSelectedDates.length === 0
+                            }
+                            className="w-full h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
+                          >
+                            <Plus size={16} />
+                            Add {quickLeaveSelectedDates.length || 0} {quickLeaveType} Record{quickLeaveSelectedDates.length > 1 ? "s" : ""}
+                          </button>
+
+                          {/* 5. Feedback List */}
+                          <div className="pt-4 border-t border-slate-100">
+                            <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">
+                              Active Absences in Target Period ({startDate} to {endDate})
+                            </h5>
+                            <div className="flex flex-wrap gap-2">
+                              {leaveRequests.filter(
+                                (l) =>
+                                  l.startDate <= (endDate || startDate) &&
+                                  l.endDate >= startDate,
+                              ).length === 0 && (
+                                <span className="text-[9px] italic text-slate-300">
+                                  No registered absences in this period.
+                                </span>
+                              )}
+                              {leaveRequests
+                                .filter(
+                                  (l) =>
+                                    l.startDate <= (endDate || startDate) &&
+                                    l.endDate >= startDate,
+                                )
+                                .map((l) => (
+                                  <div
+                                    key={l.id}
+                                    className="px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center gap-2 animate-in fade-in zoom-in"
+                                  >
+                                    <span className="text-[10px] font-black text-indigo-700 uppercase">
+                                      {staff.find((s) => s.id === l.staffId)?.initials}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-indigo-500">
+                                      {l.type}
+                                    </span>
+                                    <span className="text-[8px] font-bold text-indigo-400 bg-indigo-100 px-1 rounded">
+                                      {l.startDate === l.endDate
+                                        ? l.startDate
+                                        : `${l.startDate} - ${l.endDate}`}
+                                    </span>
+                                    <button
+                                      onClick={() => deleteLeaveRequest(l.id)}
+                                      className="text-indigo-400 hover:text-indigo-600"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
