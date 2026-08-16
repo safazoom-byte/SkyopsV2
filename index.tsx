@@ -723,23 +723,41 @@ const App: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Improved matching logic to handle suffixes (e.g. MS-ATZ)
+  // Case-insensitive staff token matcher (handles small/capital letters, suffixes e.g. mz, MZ, ms-atz, etc.)
   const matchStaffToken = (token: string, staffList: Staff[]) => {
+    if (!token) return null;
     const cleanToken = token.trim().toUpperCase();
     if (!cleanToken) return null;
 
-    // 1. Exact Match
+    // 1. Exact Match on Initials (case-insensitive)
     const exact = staffList.find(
-      (s) => s.initials.toUpperCase() === cleanToken,
+      (s) => s.initials && s.initials.trim().toUpperCase() === cleanToken,
     );
     if (exact) return exact.id;
 
-    // 2. Prefix Match (Handling "MS-Atz" matching "MS-ATZ" or "MS" matching "MS-ATZ")
-    const tokenPrefix = cleanToken.split("-")[0];
-    const prefixMatch = staffList.find(
-      (s) => s.initials.toUpperCase().split("-")[0] === tokenPrefix,
+    // 2. Exact Match on Staff Name (case-insensitive)
+    const nameMatch = staffList.find(
+      (s) => s.name && s.name.trim().toUpperCase() === cleanToken,
     );
-    if (prefixMatch) return prefixMatch.id;
+    if (nameMatch) return nameMatch.id;
+
+    // 3. Prefix Match on Initials (Handling "ms" matching "MS-ATZ" or "MS-Atz" matching "MS-ATZ")
+    const tokenPrefix = cleanToken.split(/[-_\s]/)[0];
+    if (tokenPrefix) {
+      const prefixMatch = staffList.find(
+        (s) => s.initials && s.initials.trim().toUpperCase().split(/[-_\s]/)[0] === tokenPrefix,
+      );
+      if (prefixMatch) return prefixMatch.id;
+    }
+
+    // 4. Normalized Alphanumeric match (ignoring dashes/spaces)
+    const normToken = cleanToken.replace(/[^A-Z0-9]/g, "");
+    if (normToken) {
+      const normMatch = staffList.find(
+        (s) => s.initials && s.initials.trim().toUpperCase().replace(/[^A-Z0-9]/g, "") === normToken,
+      );
+      if (normMatch) return normMatch.id;
+    }
 
     return null;
   };
@@ -748,8 +766,8 @@ const App: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const val = e.target.value;
-    if (val.includes(" ") || val.includes(",") || val.includes("\n")) {
-      const tokens = val.split(/[\\s,\n]+/);
+    if (val.includes(" ") || val.includes(",") || val.includes(";") || val.includes("\n") || val.includes("\t")) {
+      const tokens = val.split(/[\s,;\n\t]+/);
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
 
@@ -778,8 +796,8 @@ const App: React.FC = () => {
     e: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const val = e.target.value;
-    if (val.includes(" ") || val.includes(",") || val.includes("\n")) {
-      const tokens = val.split(/[\\s,\n]+/);
+    if (val.includes(" ") || val.includes(",") || val.includes(";") || val.includes("\n") || val.includes("\t")) {
+      const tokens = val.split(/[\s,;\n\t]+/);
       const idsToAdd: string[] = [];
       const remaining: string[] = [];
 
@@ -1344,6 +1362,45 @@ const App: React.FC = () => {
                           }
                           value={incomingSearchTerm}
                           onChange={handleIncomingSearchChange}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+                              e.preventDefault();
+                              if (incomingSearchTerm.trim()) {
+                                const tokens = incomingSearchTerm.split(/[\s,;\n\t]+/);
+                                const idsToAdd: string[] = [];
+                                const remaining: string[] = [];
+                                tokens.forEach((tok) => {
+                                  const mId = matchStaffToken(tok, staff);
+                                  if (mId) idsToAdd.push(mId);
+                                  else remaining.push(tok);
+                                });
+                                if (idsToAdd.length > 0) {
+                                  setIncomingSelectedStaffIds((prev) =>
+                                    Array.from(new Set([...prev, ...idsToAdd])),
+                                  );
+                                  setIncomingSearchTerm(remaining.join(" "));
+                                }
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (incomingSearchTerm.trim()) {
+                              const tokens = incomingSearchTerm.split(/[\s,;\n\t]+/);
+                              const idsToAdd: string[] = [];
+                              const remaining: string[] = [];
+                              tokens.forEach((tok) => {
+                                const mId = matchStaffToken(tok, staff);
+                                if (mId) idsToAdd.push(mId);
+                                else remaining.push(tok);
+                              });
+                              if (idsToAdd.length > 0) {
+                                setIncomingSelectedStaffIds((prev) =>
+                                  Array.from(new Set([...prev, ...idsToAdd])),
+                                );
+                                setIncomingSearchTerm(remaining.join(" "));
+                              }
+                            }
+                          }}
                           disabled={staff.length === 0}
                         />
                       </div>
@@ -1590,6 +1647,45 @@ const App: React.FC = () => {
                           }
                           value={quickLeaveSearchTerm}
                           onChange={handleQuickLeaveSearchChange}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
+                              e.preventDefault();
+                              if (quickLeaveSearchTerm.trim()) {
+                                const tokens = quickLeaveSearchTerm.split(/[\s,;\n\t]+/);
+                                const idsToAdd: string[] = [];
+                                const remaining: string[] = [];
+                                tokens.forEach((tok) => {
+                                  const mId = matchStaffToken(tok, staff);
+                                  if (mId) idsToAdd.push(mId);
+                                  else remaining.push(tok);
+                                });
+                                if (idsToAdd.length > 0) {
+                                  setQuickLeaveStaffIds((prev) =>
+                                    Array.from(new Set([...prev, ...idsToAdd])),
+                                  );
+                                  setQuickLeaveSearchTerm(remaining.join(" "));
+                                }
+                              }
+                            }
+                          }}
+                          onBlur={() => {
+                            if (quickLeaveSearchTerm.trim()) {
+                              const tokens = quickLeaveSearchTerm.split(/[\s,;\n\t]+/);
+                              const idsToAdd: string[] = [];
+                              const remaining: string[] = [];
+                              tokens.forEach((tok) => {
+                                const mId = matchStaffToken(tok, staff);
+                                if (mId) idsToAdd.push(mId);
+                                else remaining.push(tok);
+                              });
+                              if (idsToAdd.length > 0) {
+                                setQuickLeaveStaffIds((prev) =>
+                                  Array.from(new Set([...prev, ...idsToAdd])),
+                                );
+                                setQuickLeaveSearchTerm(remaining.join(" "));
+                              }
+                            }
+                          }}
                           disabled={staff.length === 0}
                         />
                       </div>
