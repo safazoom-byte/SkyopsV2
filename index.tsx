@@ -95,6 +95,7 @@ import {
   ClipboardList,
   PlaneTakeoff,
   Check,
+  Award,
 } from "lucide-react";
 import "./style.css";
 
@@ -114,6 +115,7 @@ import {
 } from "./types";
 import { FlightManager } from "./components/FlightManager";
 import { StaffManager } from "./components/StaffManager";
+import { CGRatingModule } from "./components/CGRatingModule";
 import { ShiftManager } from "./components/ShiftManager";
 import { ProgramDisplay } from "./components/ProgramDisplay";
 import { ProgramScanner } from "./components/ProgramScanner";
@@ -146,12 +148,13 @@ const App: React.FC = () => {
     | "dashboard"
     | "flights"
     | "staff"
+    | "cg_rating"
     | "shifts"
     | "program"
     | "reports"
     | "statistics"
     | "command"
-      >("dashboard");
+  >("dashboard");
   const [cloudStatus, setCloudStatus] = useState<
     "connected" | "offline" | "unconfigured" | "error" | "connecting"
   >("connecting");
@@ -1120,20 +1123,20 @@ const App: React.FC = () => {
           {/* Desktop Nav */}
           <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
             {[
-              "dashboard",
-              "flights",
-              "staff",
-              "shifts",
-              "program",
-              "reports",
-              "statistics",
+              { id: "dashboard", label: "Dashboard" },
+              { id: "flights", label: "Flights" },
+              { id: "staff", label: "Staff" },
+              { id: "shifts", label: "Shifts" },
+              { id: "program", label: "Program" },
+              { id: "reports", label: "Reports" },
+              { id: "statistics", label: "Statistics" },
             ].map((tab) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab as any)}
-                className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab ? "bg-slate-950 text-white shadow-md" : "text-slate-500"}`}
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab.id ? "bg-slate-950 text-white shadow-md" : "text-slate-500"}`}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
             {(userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
@@ -2568,8 +2571,37 @@ const App: React.FC = () => {
           />
         )}
 
-        
-                {activeTab === "reports" && (
+        {activeTab === "command" && userProfile && (
+          <CommandCenter
+            currentUser={userProfile}
+            flights={flights}
+            shifts={shifts}
+            startDate={startDate}
+            endDate={endDate}
+            staff={staff}
+            onReloadStaff={async () => {
+              try {
+                const cloudData = await db.fetchAll();
+                if (cloudData?.staff?.length) {
+                  setStaff(cloudData.staff);
+                }
+              } catch (e) {
+                console.warn("Failed to reload staff in command center:", e);
+              }
+            }}
+            onUpdateStaff={async (s) => {
+              const oldStaff = [...staff];
+              setStaff((p) => p.map((o) => (o.id === s.id ? s : o)));
+              try {
+                await db.upsertStaff(s);
+              } catch (err) {
+                console.error("Failed to update staff rating:", err);
+                setStaff(oldStaff);
+              }
+            }}
+          />
+        )}
+        {activeTab === "reports" && (
           <ReportsDisplay
             programs={programs}
             shifts={shifts}

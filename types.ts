@@ -273,3 +273,195 @@ export const isStaffActiveForDateRange = (staff: Staff, startDateStr: string, en
   
   return true;
 };
+
+// ── C&G Rating Interfaces & Formulas ──
+export interface CgConfig {
+  id?: string;
+  weight_exp: number;
+  weight_thr: number;
+  weight_acc: number;
+  exp_t1_years: number;
+  exp_t1_score: number;
+  exp_t2_years: number;
+  exp_t2_score: number;
+  exp_t3_years: number;
+  exp_t3_score: number;
+  exp_t4_years: number;
+  exp_t4_score: number;
+  exp_t5_score: number;
+  thr_t1_pax: number;
+  thr_t1_score: number;
+  thr_t2_pax: number;
+  thr_t2_score: number;
+  thr_t3_pax: number;
+  thr_t3_score: number;
+  thr_t4_pax: number;
+  thr_t4_score: number;
+  thr_t5_score: number;
+  acc_t1_err: number;
+  acc_t1_score: number;
+  acc_t2_err: number;
+  acc_t2_score: number;
+  acc_t3_err: number;
+  acc_t3_score: number;
+  acc_t4_err: number;
+  acc_t4_score: number;
+  acc_t5_err: number;
+  acc_t5_score: number;
+  acc_t6_score: number;
+  updated_at?: string;
+}
+
+export interface CgRating {
+  id?: string;
+  staff_id: string;
+  years_exp: number;
+  pax_per_flight: number;
+  errors_per_150: number;
+  score_exp: number;
+  score_thr: number;
+  score_acc: number;
+  cg_score: number;
+  updated_at?: string;
+}
+
+export interface StaffCgRating extends Staff {
+  years_exp: number;
+  pax_per_flight: number;
+  errors_per_150: number;
+  score_exp: number;
+  score_thr: number;
+  score_acc: number;
+  cg_score: number;
+  rating_id?: string;
+  rating_updated_at?: string;
+}
+
+export type CgLevel = "Weak" | "Moderate" | "Good" | "Excellent";
+
+export const DEFAULT_CG_CONFIG: CgConfig = {
+  weight_exp: 30,
+  weight_thr: 45,
+  weight_acc: 25,
+  exp_t1_years: 1,
+  exp_t1_score: 20,
+  exp_t2_years: 3,
+  exp_t2_score: 40,
+  exp_t3_years: 6,
+  exp_t3_score: 60,
+  exp_t4_years: 10,
+  exp_t4_score: 80,
+  exp_t5_score: 100,
+
+  thr_t1_pax: 30,
+  thr_t1_score: 25,
+  thr_t2_pax: 40,
+  thr_t2_score: 50,
+  thr_t3_pax: 50,
+  thr_t3_score: 75,
+  thr_t4_pax: 60,
+  thr_t4_score: 87,
+  thr_t5_score: 100,
+
+  acc_t1_err: 0,
+  acc_t1_score: 100,
+  acc_t2_err: 0.25,
+  acc_t2_score: 90,
+  acc_t3_err: 0.5,
+  acc_t3_score: 75,
+  acc_t4_err: 1,
+  acc_t4_score: 60,
+  acc_t5_err: 3,
+  acc_t5_score: 40,
+  acc_t6_score: 20,
+};
+
+export function getExpScore(years: number, c: CgConfig = DEFAULT_CG_CONFIG): number {
+  if (years < c.exp_t1_years) return c.exp_t1_score;
+  if (years < c.exp_t2_years) return c.exp_t2_score;
+  if (years < c.exp_t3_years) return c.exp_t3_score;
+  if (years <= c.exp_t4_years) return c.exp_t4_score;
+  return c.exp_t5_score;
+}
+
+export function getThrScore(pax: number, c: CgConfig = DEFAULT_CG_CONFIG): number {
+  if (pax < c.thr_t1_pax) return c.thr_t1_score;
+  if (pax < c.thr_t2_pax) return c.thr_t2_score;
+  if (pax < c.thr_t3_pax) return c.thr_t3_score;
+  if (pax < c.thr_t4_pax) return c.thr_t4_score;
+  return c.thr_t5_score;
+}
+
+export function getAccScore(err: number, c: CgConfig = DEFAULT_CG_CONFIG): number {
+  if (err <= c.acc_t1_err) return c.acc_t1_score;
+  if (err <= c.acc_t2_err) return c.acc_t2_score;
+  if (err <= c.acc_t3_err) return c.acc_t3_score;
+  if (err <= c.acc_t4_err) return c.acc_t4_score;
+  if (err <= c.acc_t5_err) return c.acc_t5_score;
+  return c.acc_t6_score;
+}
+
+export function calcCgScore(
+  years: number,
+  pax: number,
+  err: number,
+  c: CgConfig = DEFAULT_CG_CONFIG
+): { expS: number; thrS: number; accS: number; cg: number } {
+  const expS = getExpScore(years, c);
+  const thrS = getThrScore(pax, c);
+  const accS = getAccScore(err, c);
+  const cg = Math.round(
+    expS * (c.weight_exp / 100) +
+    thrS * (c.weight_thr / 100) +
+    accS * (c.weight_acc / 100)
+  );
+  return { expS, thrS, accS, cg };
+}
+
+export function getCgLevel(score: number): {
+  label: CgLevel;
+  color: string;
+  bg: string;
+  border: string;
+  text: string;
+  barColor: string;
+} {
+  if (score >= 90) {
+    return {
+      label: "Excellent",
+      color: "emerald",
+      bg: "bg-emerald-50",
+      border: "border-emerald-200",
+      text: "text-emerald-700",
+      barColor: "bg-emerald-500",
+    };
+  }
+  if (score >= 70) {
+    return {
+      label: "Good",
+      color: "indigo",
+      bg: "bg-indigo-50",
+      border: "border-indigo-200",
+      text: "text-indigo-700",
+      barColor: "bg-indigo-500",
+    };
+  }
+  if (score >= 50) {
+    return {
+      label: "Moderate",
+      color: "amber",
+      bg: "bg-amber-50",
+      border: "border-amber-200",
+      text: "text-amber-700",
+      barColor: "bg-amber-500",
+    };
+  }
+  return {
+    label: "Weak",
+    color: "rose",
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    text: "text-rose-700",
+    barColor: "bg-rose-500",
+  };
+}

@@ -13,6 +13,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.set("trust proxy", 1);
+
   app.use(helmet({
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: false,
@@ -36,6 +38,10 @@ async function startServer() {
     limit: 1000,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: {
+      xForwardedForHeader: false,
+      forwardedHeader: false,
+    },
   });
   app.use(globalLimiter);
 
@@ -43,6 +49,10 @@ async function startServer() {
     windowMs: 15 * 60 * 1000,
     limit: 30,
     message: "Too many AI generation requests, please try again later.",
+    validate: {
+      xForwardedForHeader: false,
+      forwardedHeader: false,
+    },
   });
 
   app.use(express.json({ limit: "50mb" }));

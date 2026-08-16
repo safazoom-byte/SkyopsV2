@@ -10,6 +10,9 @@ import {
   UserProfile,
   AuditLog,
   Airport,
+  CgConfig,
+  CgRating,
+  DEFAULT_CG_CONFIG,
 } from "../types";
 
 const SUPABASE_URL =
@@ -1382,6 +1385,197 @@ export const db = {
         l.actionType === "GENERATE_AI" &&
         new Date(l.createdAt) >= startDate,
     ).length;
+  },
+
+  async getCgConfig(): Promise<CgConfig> {
+    if (!supabase) {
+      try {
+        const stored = localStorage.getItem("cg_config");
+        return stored ? JSON.parse(stored) : DEFAULT_CG_CONFIG;
+      } catch {
+        return DEFAULT_CG_CONFIG;
+      }
+    }
+    try {
+      const { data, error } = await supabase
+        .from("cg_config")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) {
+        return DEFAULT_CG_CONFIG;
+      }
+      return {
+        id: data.id,
+        weight_exp: Number(data.weight_exp ?? DEFAULT_CG_CONFIG.weight_exp),
+        weight_thr: Number(data.weight_thr ?? DEFAULT_CG_CONFIG.weight_thr),
+        weight_acc: Number(data.weight_acc ?? DEFAULT_CG_CONFIG.weight_acc),
+        exp_t1_years: Number(data.exp_t1_years ?? DEFAULT_CG_CONFIG.exp_t1_years),
+        exp_t1_score: Number(data.exp_t1_score ?? DEFAULT_CG_CONFIG.exp_t1_score),
+        exp_t2_years: Number(data.exp_t2_years ?? DEFAULT_CG_CONFIG.exp_t2_years),
+        exp_t2_score: Number(data.exp_t2_score ?? DEFAULT_CG_CONFIG.exp_t2_score),
+        exp_t3_years: Number(data.exp_t3_years ?? DEFAULT_CG_CONFIG.exp_t3_years),
+        exp_t3_score: Number(data.exp_t3_score ?? DEFAULT_CG_CONFIG.exp_t3_score),
+        exp_t4_years: Number(data.exp_t4_years ?? DEFAULT_CG_CONFIG.exp_t4_years),
+        exp_t4_score: Number(data.exp_t4_score ?? DEFAULT_CG_CONFIG.exp_t4_score),
+        exp_t5_score: Number(data.exp_t5_score ?? DEFAULT_CG_CONFIG.exp_t5_score),
+        thr_t1_pax: Number(data.thr_t1_pax ?? DEFAULT_CG_CONFIG.thr_t1_pax),
+        thr_t1_score: Number(data.thr_t1_score ?? DEFAULT_CG_CONFIG.thr_t1_score),
+        thr_t2_pax: Number(data.thr_t2_pax ?? DEFAULT_CG_CONFIG.thr_t2_pax),
+        thr_t2_score: Number(data.thr_t2_score ?? DEFAULT_CG_CONFIG.thr_t2_score),
+        thr_t3_pax: Number(data.thr_t3_pax ?? DEFAULT_CG_CONFIG.thr_t3_pax),
+        thr_t3_score: Number(data.thr_t3_score ?? DEFAULT_CG_CONFIG.thr_t3_score),
+        thr_t4_pax: Number(data.thr_t4_pax ?? DEFAULT_CG_CONFIG.thr_t4_pax),
+        thr_t4_score: Number(data.thr_t4_score ?? DEFAULT_CG_CONFIG.thr_t4_score),
+        thr_t5_score: Number(data.thr_t5_score ?? DEFAULT_CG_CONFIG.thr_t5_score),
+        acc_t1_err: Number(data.acc_t1_err ?? DEFAULT_CG_CONFIG.acc_t1_err),
+        acc_t1_score: Number(data.acc_t1_score ?? DEFAULT_CG_CONFIG.acc_t1_score),
+        acc_t2_err: Number(data.acc_t2_err ?? DEFAULT_CG_CONFIG.acc_t2_err),
+        acc_t2_score: Number(data.acc_t2_score ?? DEFAULT_CG_CONFIG.acc_t2_score),
+        acc_t3_err: Number(data.acc_t3_err ?? DEFAULT_CG_CONFIG.acc_t3_err),
+        acc_t3_score: Number(data.acc_t3_score ?? DEFAULT_CG_CONFIG.acc_t3_score),
+        acc_t4_err: Number(data.acc_t4_err ?? DEFAULT_CG_CONFIG.acc_t4_err),
+        acc_t4_score: Number(data.acc_t4_score ?? DEFAULT_CG_CONFIG.acc_t4_score),
+        acc_t5_err: Number(data.acc_t5_err ?? DEFAULT_CG_CONFIG.acc_t5_err),
+        acc_t5_score: Number(data.acc_t5_score ?? DEFAULT_CG_CONFIG.acc_t5_score),
+        acc_t6_score: Number(data.acc_t6_score ?? DEFAULT_CG_CONFIG.acc_t6_score),
+        updated_at: data.updated_at,
+      };
+    } catch (e) {
+      console.warn("Failed to fetch cg_config from Supabase:", e);
+      return DEFAULT_CG_CONFIG;
+    }
+  },
+
+  async upsertCgConfig(config: Partial<CgConfig>): Promise<CgConfig | null> {
+    const payload = {
+      ...config,
+      updated_at: new Date().toISOString(),
+    };
+    if (!supabase) {
+      try {
+        localStorage.setItem("cg_config", JSON.stringify(payload));
+        return payload as CgConfig;
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const { data, error } = await supabase
+        .from("cg_config")
+        .upsert(payload)
+        .select()
+        .single();
+      if (error) {
+        console.warn("Error upserting cg_config:", error);
+        // Fallback local save
+        localStorage.setItem("cg_config", JSON.stringify(payload));
+        return payload as CgConfig;
+      }
+      this.logAction("UPDATE", "USER_PROFILE", data.id || "config", "Updated C&G rating configuration");
+      return data as CgConfig;
+    } catch (e) {
+      console.warn("Exception upserting cg_config:", e);
+      localStorage.setItem("cg_config", JSON.stringify(payload));
+      return payload as CgConfig;
+    }
+  },
+
+  async getCgRatings(): Promise<CgRating[]> {
+    if (!supabase) {
+      try {
+        const stored = localStorage.getItem("cg_ratings");
+        return stored ? JSON.parse(stored) : [];
+      } catch {
+        return [];
+      }
+    }
+    try {
+      const { data, error } = await supabase
+        .from("cg_ratings")
+        .select("*");
+      if (error) {
+        console.warn("Error fetching cg_ratings:", error);
+        const stored = localStorage.getItem("cg_ratings");
+        return stored ? JSON.parse(stored) : [];
+      }
+      return (data || []).map((r: any) => ({
+        id: r.id,
+        staff_id: r.staff_id,
+        years_exp: Number(r.years_exp ?? 0),
+        pax_per_flight: Number(r.pax_per_flight ?? 0),
+        errors_per_150: Number(r.errors_per_150 ?? 0),
+        score_exp: Number(r.score_exp ?? 0),
+        score_thr: Number(r.score_thr ?? 0),
+        score_acc: Number(r.score_acc ?? 0),
+        cg_score: Number(r.cg_score ?? 0),
+        updated_at: r.updated_at,
+      }));
+    } catch (e) {
+      console.warn("Exception fetching cg_ratings:", e);
+      const stored = localStorage.getItem("cg_ratings");
+      return stored ? JSON.parse(stored) : [];
+    }
+  },
+
+  async upsertCgRating(rating: CgRating): Promise<boolean> {
+    const payload = {
+      staff_id: rating.staff_id,
+      years_exp: rating.years_exp,
+      pax_per_flight: rating.pax_per_flight,
+      errors_per_150: rating.errors_per_150,
+      score_exp: rating.score_exp,
+      score_thr: rating.score_thr,
+      score_acc: rating.score_acc,
+      cg_score: rating.cg_score,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Always update local cache
+    try {
+      const stored = localStorage.getItem("cg_ratings");
+      const list: CgRating[] = stored ? JSON.parse(stored) : [];
+      const idx = list.findIndex(r => r.staff_id === rating.staff_id);
+      if (idx >= 0) {
+        list[idx] = { ...list[idx], ...payload };
+      } else {
+        list.push({ ...payload, id: `local-${Date.now()}` });
+      }
+      localStorage.setItem("cg_ratings", JSON.stringify(list));
+    } catch {}
+
+    if (!supabase) return true;
+
+    try {
+      const { error } = await supabase
+        .from("cg_ratings")
+        .upsert(payload, { onConflict: "staff_id" });
+      if (error) {
+        console.warn("Error upserting cg_rating to Supabase:", error);
+      }
+      // Also sync rating score directly to staff table
+      const { data: staffData } = await supabase
+        .from("staff")
+        .select("skill_ratings")
+        .eq("id", rating.staff_id)
+        .maybeSingle();
+
+      const currentSkills = staffData?.skill_ratings || {};
+      await supabase
+        .from("staff")
+        .update({
+          skill_ratings: {
+            ...currentSkills,
+            rating: rating.cg_score,
+          },
+        })
+        .eq("id", rating.staff_id);
+
+      return true;
+    } catch (e) {
+      console.warn("Exception upserting cg_rating:", e);
+      return false;
+    }
   },
 
   async exportDatabase() {

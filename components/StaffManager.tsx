@@ -1,5 +1,16 @@
-import React, { useState, useMemo } from "react";
-import { Staff, Skill, StaffCategory, isStaffActiveOnDate } from "../types";
+import React, { useState, useMemo, useEffect } from "react";
+import {
+  Staff,
+  Skill,
+  StaffCategory,
+  isStaffActiveOnDate,
+  CgConfig,
+  CgRating,
+  DEFAULT_CG_CONFIG,
+  calcCgScore,
+  getCgLevel,
+} from "../types";
+import { db } from "../services/supabaseService";
 import { AVAILABLE_SKILLS } from "../constants";
 import {
   Users,
@@ -21,6 +32,7 @@ import {
   HardHat,
   Calculator,
   Truck,
+  Award,
 } from "lucide-react";
 
 interface Props {
@@ -54,6 +66,26 @@ export const StaffManager: React.FC<Props> = ({
   const [editPeriods, setEditPeriods] = useState<
     { start: string; end: string }[]
   >([]);
+  const [cgRatings, setCgRatings] = useState<Record<string, CgRating>>({});
+  const [cgConfig, setCgConfig] = useState<CgConfig>(DEFAULT_CG_CONFIG);
+
+  useEffect(() => {
+    const fetchCgData = async () => {
+      try {
+        const [cfg, rts] = await Promise.all([
+          db.getCgConfig(),
+          db.getCgRatings(),
+        ]);
+        setCgConfig(cfg);
+        const map: Record<string, CgRating> = {};
+        rts.forEach((r) => {
+          map[r.staff_id] = r;
+        });
+        setCgRatings(map);
+      } catch (e) {}
+    };
+    fetchCgData();
+  }, [staff]);
 
   const getTimelineStyle = (start?: string, end?: string) => {
     if (!start || !end) return { left: "0%", width: "100%" };
@@ -959,6 +991,8 @@ export const StaffManager: React.FC<Props> = ({
                           </div>
                         </div>
                       )}
+
+                      {/* Performance ratings are hidden in Staff Manager to protect privacy and managed exclusively in CMD Rating System */}
 
                       <div className="space-y-2 md:space-y-3">
                         <p className="text-[7px] md:text-[8px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">

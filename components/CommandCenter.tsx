@@ -14,10 +14,12 @@ import {
   PlaneTakeoff,
   Star,
   Download, ChevronDown, ChevronRight,
+  Award,
 } from "lucide-react";
 import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
 import { db, auth, supabase } from "../services/supabaseService";
 import { AirlineManager } from "./AirlineManager";
+import { CGRatingModule } from "./CGRatingModule";
 
 const NumberInput = ({ label, value, onChange, onBlur, disabled }: any) => {
   const [val, setVal] = useState(value?.toString() || "0");
@@ -78,6 +80,7 @@ interface CommandCenterProps {
   endDate?: string;
   staff?: Staff[];
   onUpdateStaff?: (s: Staff) => void;
+  onReloadStaff?: () => void;
 }
 
 export const CommandCenter: React.FC<CommandCenterProps> = ({
@@ -88,6 +91,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   endDate,
   staff = [],
   onUpdateStaff,
+  onReloadStaff,
 }) => {
   const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines" | "ratings">(() => currentUser.role === "super_admin" ? "audit" : "users");
   const [newAirportName, setNewAirportName] = useState("");
@@ -102,6 +106,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   
   
   const [ratingsSearch, setRatingsSearch] = useState("");
+  const [ratingsSubTab, setRatingsSubTab] = useState<"cg_engine" | "role_ratings">("cg_engine");
   const [airports, setAirports] = useState<any[]>([]);
   const [newUserAirportId, setNewUserAirportId] = useState("");
 
@@ -148,7 +153,6 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       { header: 'SN', key: 'sn', width: 6 },
       { header: 'Initials', key: 'initials', width: 12 },
       { header: 'Name', key: 'name', width: 30 },
-      { header: 'C&G Rate (%)', key: 'cg', width: 18 },
       { header: 'SL Rate (%)', key: 'sl', width: 18 },
       { header: 'OPS Rate (%)', key: 'ops', width: 18 },
       { header: 'LF Rate (%)', key: 'lf', width: 18 },
@@ -167,7 +171,6 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
     });
 
     trafficStaff.forEach((s, idx) => {
-      const cg = s.rating !== undefined && s.rating !== null ? s.rating : 100;
       const sl = s.isShiftLeader ? (s.ratingSL !== undefined && s.ratingSL !== null ? s.ratingSL : 100) : "N/A";
       const ops = s.isOps ? (s.ratingOps !== undefined && s.ratingOps !== null ? s.ratingOps : 100) : "N/A";
       const lf = s.isLostFound ? (s.ratingLF !== undefined && s.ratingLF !== null ? s.ratingLF : 100) : "N/A";
@@ -177,7 +180,6 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
         sn: idx + 1,
         initials: s.initials,
         name: s.name,
-        cg,
         sl,
         ops,
         lf,
@@ -260,6 +262,9 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       setLogs(fetchedLogs);
       setUsers(fetchedUsers);
       setAirports(fetchedAirports);
+      if (onReloadStaff) {
+        onReloadStaff();
+      }
     } catch (e) {
       console.warn("Failed to load command center data", e);
     } finally {
@@ -860,169 +865,223 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
       ) : activeTab === "airlines" ? (
         <AirlineManager flights={flights} shifts={shifts} startDate={startDate} endDate={endDate} />
       ) : activeTab === "ratings" ? (
-        <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
-            <div>
-              <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider animate-in fade-in">
-                Rating System
-              </h4>
-              <p className="text-xs text-slate-400 mt-1">
-                Rate traffic staff from 0% to 100%. Shift Power is calculated as the average rating of assigned traffic staff.
-              </p>
-            </div>
-            <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-3">
-              <div className="relative w-full sm:w-auto">
-                <Search
-                  size={16}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  type="text"
-                  placeholder="Search staff..."
-                  value={ratingsSearch}
-                  onChange={(e) => setRatingsSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
-                />
-              </div>
-              <button
-                onClick={exportRatingsExcel}
-                className="w-full sm:w-auto px-4 py-2 bg-slate-900 text-white rounded-xl font-bold uppercase text-[10px] md:text-xs hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2"
-                title="Download Ratings"
-              >
-                <Download size={14} /> Download Excel
-              </button>
-            </div>
+        <div className="space-y-6">
+          {/* Sub-tab switcher */}
+          <div className="flex items-center gap-2 p-1.5 bg-slate-900/90 rounded-2xl w-fit border border-slate-800 shadow-inner">
+            <button
+              onClick={() => setRatingsSubTab("cg_engine")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                ratingsSubTab === "cg_engine"
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Award size={15} />
+              <span>C&G Rating Engine</span>
+            </button>
+            <button
+              onClick={() => setRatingsSubTab("role_ratings")}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+                ratingsSubTab === "role_ratings"
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Star size={15} />
+              <span>Role Ratings (SL, OPS, LF, RAMP)</span>
+            </button>
           </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
-                  <th className="px-6 py-3 w-20">S/N</th>
-                  <th className="px-6 py-3 w-32">Initials</th>
-                  <th className="px-6 py-3">Name</th>
-                                    <th className="px-6 py-3 w-64 text-center">C&G Rating</th>
-<th className="px-6 py-3 text-center">Role Ratings</th>
-                </tr>
-              </thead>
-              <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
-                {filteredTrafficStaff.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-slate-400 font-bold">
-                      No traffic staff members found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTrafficStaff.map((member, sIdx) => {
-                    const currentVal = member.rating !== undefined && member.rating !== null ? member.rating : 100;
 
-                    const renderRoleStepper = (label: string, colorTheme: 'rose' | 'emerald' | 'indigo' | 'amber', valueKey: keyof typeof member) => {
-                      const val = member[valueKey] !== undefined && member[valueKey] !== null ? member[valueKey] as number : 100;
-                      const colors = {
-                        rose: { text: "text-rose-600", val: "text-rose-700", bg: "bg-rose-500", track: "bg-slate-100", btn: "bg-rose-50 hover:bg-rose-100 text-rose-600", focus: "focus:ring-rose-500" },
-                        emerald: { text: "text-emerald-600", val: "text-emerald-700", bg: "bg-emerald-500", track: "bg-slate-100", btn: "bg-emerald-50 hover:bg-emerald-100 text-emerald-600", focus: "focus:ring-emerald-500" },
-                        indigo: { text: "text-indigo-600", val: "text-indigo-700", bg: "bg-indigo-500", track: "bg-slate-100", btn: "bg-indigo-50 hover:bg-indigo-100 text-indigo-600", focus: "focus:ring-indigo-500" },
-                        amber: { text: "text-amber-600", val: "text-amber-700", bg: "bg-amber-500", track: "bg-slate-100", btn: "bg-amber-50 hover:bg-amber-100 text-amber-600", focus: "focus:ring-amber-500" },
-                      };
-                      const c = colors[colorTheme];
-                      return (
-                        <div key={valueKey} className="flex items-center gap-2 justify-between">
-                          <span className={`text-[10px] font-bold ${c.text} w-8`}>{label}</span>
-                          <div className="flex items-center gap-1.5 flex-1">
-                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.max(0, val - 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>-</button>
-                            <div className={`flex-1 h-1.5 ${c.track} rounded-full overflow-hidden relative min-w-[30px]`}>
-                              <div className={`h-full ${c.bg} transition-all absolute left-0 top-0`} style={{ width: `${val}%` }}></div>
-                            </div>
-                            <button onClick={() => onUpdateStaff && onUpdateStaff({...member, [valueKey]: Math.min(100, val + 5)})} className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}>+</button>
-                          </div>
-                          <div className="flex items-center gap-0.5">
-                            <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                value={val}
-                                onWheel={(e) => e.currentTarget.blur()}
-                                onChange={(e) => {
-                                  let v = parseInt(e.target.value, 10);
-                                  if (isNaN(v)) v = 0;
-                                  if (v < 0) v = 0;
-                                  if (v > 100) v = 100;
-                                  if (onUpdateStaff) onUpdateStaff({...member, [valueKey]: v});
-                                }}
-                                className={`w-10 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 ${c.focus} text-[10px] text-slate-700`}
-                            />
-                            <span className="text-[10px] font-bold text-slate-400">%</span>
-                          </div>
-                        </div>
-                      );
-                    };
+          {ratingsSubTab === "cg_engine" ? (
+            <CGRatingModule
+              staffList={staff}
+              onStaffUpdated={loadData}
+              currentUserRole={currentUser?.role}
+            />
+          ) : (
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden animate-in fade-in">
+              <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row gap-4 sm:gap-0 justify-between items-start sm:items-center bg-slate-50/50">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                    Role & Skill Ratings (Traffic Staff Only)
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Rate traffic staff across Shift Leader (SL), Operations (OPS), Lost & Found (LF), and Ramp (RAMP). C&G Rating is calculated directly by the C&G Rating Engine. Power calculations in Program Display will reflect these rates.
+                  </p>
+                </div>
+                <div className="w-full sm:w-auto flex flex-col sm:flex-row items-center gap-3">
+                  <div className="relative w-full sm:w-auto">
+                    <Search
+                      size={16}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search traffic staff..."
+                      value={ratingsSearch}
+                      onChange={(e) => setRatingsSearch(e.target.value)}
+                      className="pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 w-full sm:w-64"
+                    />
+                  </div>
+                  <button
+                    onClick={exportRatingsExcel}
+                    className="w-full sm:w-auto px-4 py-2 bg-slate-900 text-white rounded-xl font-bold uppercase text-[10px] md:text-xs hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    title="Download Ratings"
+                  >
+                    <Download size={14} /> Download Excel
+                  </button>
+                </div>
+              </div>
 
-                    return (
-                      <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-6 py-4 font-bold text-slate-400">{sIdx + 1}</td>
-                        <td className="px-6 py-4">
-                          <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-mono font-black text-[10px]">
-                            {member.initials}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 font-bold text-slate-900">{member.name}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-4 justify-center">
-                            <div className="flex items-center gap-2 flex-1 max-w-[200px]">
-                              <button
-                                onClick={() => {
-                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.max(0, currentVal - 5) });
-                                }}
-                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
-                              >-</button>
-                              <div className="w-full h-1.5 bg-slate-100 rounded-lg overflow-hidden relative min-w-[40px]">
-                                <div className="h-full bg-emerald-500 absolute left-0 top-0 transition-all" style={{ width: `${currentVal}%` }}></div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (onUpdateStaff) onUpdateStaff({ ...member, rating: Math.min(100, currentVal + 5) });
-                                }}
-                                className="w-7 h-7 shrink-0 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold flex items-center justify-center transition-colors"
-                              >+</button>
-                            </div>
-                            <div className="flex items-center gap-1 w-16 shrink-0">
-                              <input type="number" onWheel={(e) => e.currentTarget.blur()}
-                                min="0"
-                                max="100"
-                                value={currentVal}
-                                onChange={(e) => {
-                                  let val = parseInt(e.target.value, 10);
-                                  if (isNaN(val)) val = 0;
-                                  if (val < 0) val = 0;
-                                  if (val > 100) val = 100;
-                                  if (onUpdateStaff) {
-                                    onUpdateStaff({
-                                      ...member,
-                                      rating: val
-                                    });
-                                  }
-                                }}
-                                className="w-12 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 text-xs"
-                              />
-                              <span className="text-xs font-bold text-slate-400">%</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col gap-3 min-w-[180px]">
-                            {member.isShiftLeader && renderRoleStepper("SL", "rose", "ratingSL")}
-                            {member.isOps && renderRoleStepper("OPS", "emerald", "ratingOps")}
-                            {member.isLostFound && renderRoleStepper("LF", "indigo", "ratingLF")}
-                            {member.isRamp && renderRoleStepper("RMP", "amber", "ratingRamp")}
-                          </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider">
+                      <th className="px-6 py-3 w-20">S/N</th>
+                      <th className="px-6 py-3 w-32">Initials</th>
+                      <th className="px-6 py-3">Name</th>
+                      <th className="px-6 py-3 text-center">Role Ratings (SL / OPS / LF / RMP)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs font-medium text-slate-700 divide-y divide-slate-100">
+                    {filteredTrafficStaff.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-6 py-8 text-center text-slate-400 font-bold">
+                          No traffic staff members found matching your search.
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                    ) : (
+                      filteredTrafficStaff.map((member, sIdx) => {
+                        const renderRoleStepper = (
+                          label: string,
+                          colorTheme: "rose" | "emerald" | "indigo" | "amber",
+                          valueKey: keyof typeof member
+                        ) => {
+                          const val =
+                            member[valueKey] !== undefined && member[valueKey] !== null
+                              ? (member[valueKey] as number)
+                              : 100;
+                          const colors = {
+                            rose: {
+                              text: "text-rose-600",
+                              val: "text-rose-700",
+                              bg: "bg-rose-500",
+                              track: "bg-slate-100",
+                              btn: "bg-rose-50 hover:bg-rose-100 text-rose-600",
+                              focus: "focus:ring-rose-500",
+                            },
+                            emerald: {
+                              text: "text-emerald-600",
+                              val: "text-emerald-700",
+                              bg: "bg-emerald-500",
+                              track: "bg-slate-100",
+                              btn: "bg-emerald-50 hover:bg-emerald-100 text-emerald-600",
+                              focus: "focus:ring-emerald-500",
+                            },
+                            indigo: {
+                              text: "text-indigo-600",
+                              val: "text-indigo-700",
+                              bg: "bg-indigo-500",
+                              track: "bg-slate-100",
+                              btn: "bg-indigo-50 hover:bg-indigo-100 text-indigo-600",
+                              focus: "focus:ring-indigo-500",
+                            },
+                            amber: {
+                              text: "text-amber-600",
+                              val: "text-amber-700",
+                              bg: "bg-amber-500",
+                              track: "bg-slate-100",
+                              btn: "bg-amber-50 hover:bg-amber-100 text-amber-600",
+                              focus: "focus:ring-amber-500",
+                            },
+                          };
+                          const c = colors[colorTheme];
+                          return (
+                            <div key={valueKey} className="flex items-center gap-2 justify-between">
+                              <span className={`text-[10px] font-bold ${c.text} w-8`}>{label}</span>
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <button
+                                  onClick={() =>
+                                    onUpdateStaff &&
+                                    onUpdateStaff({
+                                      ...member,
+                                      [valueKey]: Math.max(0, val - 5),
+                                    })
+                                  }
+                                  className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}
+                                >
+                                  -
+                                </button>
+                                <div
+                                  className={`flex-1 h-1.5 ${c.track} rounded-full overflow-hidden relative min-w-[30px]`}
+                                >
+                                  <div
+                                    className={`h-full ${c.bg} transition-all absolute left-0 top-0`}
+                                    style={{ width: `${val}%` }}
+                                  ></div>
+                                </div>
+                                <button
+                                  onClick={() =>
+                                    onUpdateStaff &&
+                                    onUpdateStaff({
+                                      ...member,
+                                      [valueKey]: Math.min(100, val + 5),
+                                    })
+                                  }
+                                  className={`w-5 h-5 shrink-0 rounded flex items-center justify-center font-bold text-xs transition-colors ${c.btn}`}
+                                >
+                                  +
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-0.5">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={val}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  onChange={(e) => {
+                                    let v = parseInt(e.target.value, 10);
+                                    if (isNaN(v)) v = 0;
+                                    if (v < 0) v = 0;
+                                    if (v > 100) v = 100;
+                                    if (onUpdateStaff)
+                                      onUpdateStaff({ ...member, [valueKey]: v });
+                                  }}
+                                  className={`w-10 px-1 py-0.5 text-center bg-slate-50 border border-slate-200 rounded font-bold focus:outline-none focus:ring-1 ${c.focus} text-[10px] text-slate-700`}
+                                />
+                                <span className="text-[10px] font-bold text-slate-400">%</span>
+                              </div>
+                            </div>
+                          );
+                        };
+
+                        return (
+                          <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4 font-bold text-slate-400">{sIdx + 1}</td>
+                            <td className="px-6 py-4">
+                              <span className="bg-slate-100 text-slate-700 px-2 py-1 rounded-md font-mono font-black text-[10px]">
+                                {member.initials}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-slate-900">{member.name}</td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-3 min-w-[180px]">
+                                {member.isShiftLeader && renderRoleStepper("SL", "rose", "ratingSL")}
+                                {member.isOps && renderRoleStepper("OPS", "emerald", "ratingOps")}
+                                {member.isLostFound && renderRoleStepper("LF", "indigo", "ratingLF")}
+                                {member.isRamp && renderRoleStepper("RMP", "amber", "ratingRamp")}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-6">

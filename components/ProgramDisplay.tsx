@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   DailyProgram,
   Flight,
@@ -10,18 +10,22 @@ import {
   ProgramVersion,
   ManualAssignment,
   PeriodSettings,
+  CgRating,
+  CgConfig,
+  DEFAULT_CG_CONFIG,
+  calcCgScore,
   isStaffActiveOnDate,
   isStaffActiveInPeriod,
 } from "../types";
 
 const getStaffRoleRating = (st: Staff | undefined | null, role: string) => {
   if (!st) return 100;
-  if (role === "SL" || role === "Shift Leader") return st.ratingSL !== undefined ? st.ratingSL : (st.rating !== undefined ? st.rating : 100);
-  if (role === "RMP" || role === "Ramp") return st.ratingRamp !== undefined ? st.ratingRamp : (st.rating !== undefined ? st.rating : 100);
-  if (role === "OPS" || role === "Operations") return st.ratingOps !== undefined ? st.ratingOps : (st.rating !== undefined ? st.rating : 100);
-  if (role === "LF" || role === "Lost and Found") return st.ratingLF !== undefined ? st.ratingLF : (st.rating !== undefined ? st.rating : 100);
-  if (role === "LC" || role === "Load Control") return st.ratingLC !== undefined ? st.ratingLC : (st.rating !== undefined ? st.rating : 100);
-  return st.rating !== undefined ? st.rating : 100;
+  if (role === "SL" || role === "Shift Leader") return st.ratingSL != null ? Number(st.ratingSL) : (st.rating != null ? Number(st.rating) : 100);
+  if (role === "RMP" || role === "Ramp") return st.ratingRamp != null ? Number(st.ratingRamp) : (st.rating != null ? Number(st.rating) : 100);
+  if (role === "OPS" || role === "Operations") return st.ratingOps != null ? Number(st.ratingOps) : (st.rating != null ? Number(st.rating) : 100);
+  if (role === "LF" || role === "Lost and Found") return st.ratingLF != null ? Number(st.ratingLF) : (st.rating != null ? Number(st.rating) : 100);
+  if (role === "LC" || role === "Load Control") return st.ratingLC != null ? Number(st.ratingLC) : (st.rating != null ? Number(st.rating) : 100);
+  return st.rating != null ? Number(st.rating) : 100;
 };
 import { ProgramCheck } from "./ProgramCheck";
 import {
@@ -112,6 +116,8 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [hideAccountantsOffDuty, setHideAccountantsOffDuty] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [cgRatingsMap, setCgRatingsMap] = useState<Record<string, CgRating>>({});
+  const [cgConfig, setCgConfig] = useState<CgConfig>(DEFAULT_CG_CONFIG);
 
   // Temporary state for the modal form inputs
   const [tempPrep, setTempPrep] = useState("");
@@ -124,7 +130,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [tempHideAccountants, setTempHideAccountants] = useState(false);
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const fetchProfileAndCg = async () => {
       try {
         if (supabase) {
           const prof = await db.getUserProfile(true);
@@ -133,8 +139,25 @@ export const ProgramDisplay: React.FC<Props> = ({
       } catch (err) {
         console.error("Error fetching user profile:", err);
       }
+
+      try {
+        const [fetchedRatings, fetchedConfig] = await Promise.all([
+          db.getCgRatings(),
+          db.getCgConfig(),
+        ]);
+        const map: Record<string, CgRating> = {};
+        (fetchedRatings || []).forEach((r) => {
+          map[r.staff_id] = r;
+        });
+        setCgRatingsMap(map);
+        if (fetchedConfig) {
+          setCgConfig(fetchedConfig);
+        }
+      } catch (err) {
+        console.error("Error loading C&G data in ProgramDisplay:", err);
+      }
     };
-    fetchProfile();
+    fetchProfileAndCg();
   }, []);
 
   useEffect(() => {
@@ -278,6 +301,25 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (hideSecurityOffDuty && s.isSecurity) return false;
     if (hideAccountantsOffDuty && s.isAccountant) return false;
     return true;
+  };
+
+  // Live C&G rate lookup for staff
+  const getStaffCgRate = (st: Staff | undefined | null): number => {
+    if (!st) return 100;
+    const r = cgRatingsMap[st.id];
+    if (r) {
+      if (r.cg_score !== undefined && r.cg_score !== null && r.cg_score > 0) {
+        return r.cg_score;
+      }
+      const { cg } = calcCgScore(r.years_exp, r.pax_per_flight, r.errors_per_150, cgConfig);
+      return cg;
+    }
+    if (st.rating !== undefined && st.rating !== null && st.rating !== 100) {
+      return st.rating;
+    }
+    // Default fallback from calcCgScore with 0 years, 0 pax, 0 err
+    const { cg } = calcCgScore(0, 0, 0, cgConfig);
+    return cg;
   };
 
   useEffect(() => {
@@ -3900,7 +3942,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                                   ? Math.round(
                                       assignedTraffic.reduce((sum, a) => {
                                         const st = getStaff(a.staffId);
-                                        return sum + getStaffRoleRating(st, a.role);
+                                        return sum + getStaffCgRate(st);
                                       }, 0) / assignedTraffic.length
                                     )
                                   : 0;
@@ -3908,14 +3950,21 @@ export const ProgramDisplay: React.FC<Props> = ({
                                 const getShiftMaxRating = (key: 'ratingRamp' | 'ratingOps' | 'ratingSL', roleKey: 'isRamp' | 'isOps' | 'isShiftLeader') => {
                                   const eligibleStaff = assignedTraffic.filter(a => {
                                     const st = getStaff(a.staffId);
-                                    return st && st[roleKey];
+                                    return st && (st[roleKey] || (a.role && (
+                                      (roleKey === 'isRamp' && (a.role === 'RMP' || a.role === 'Ramp')) ||
+                                      (roleKey === 'isOps' && (a.role === 'OPS' || a.role === 'Operations')) ||
+                                      (roleKey === 'isShiftLeader' && (a.role === 'SL' || a.role === 'Shift Leader'))
+                                    )));
                                   });
                                   if (eligibleStaff.length === 0) return 0;
                                   return eligibleStaff.reduce((max, a) => {
                                     const st = getStaff(a.staffId);
                                     if (!st) return max;
-                                    const rate = st[key] !== undefined && st[key] !== null ? st[key] : (st.rating !== undefined && st.rating !== null ? st.rating : 100);
-                                    return Math.max(max, rate as number);
+                                    const roleSpecificRate = st[key];
+                                    const rate = roleSpecificRate !== undefined && roleSpecificRate !== null
+                                      ? Number(roleSpecificRate)
+                                      : getStaffCgRate(st);
+                                    return Math.max(max, rate);
                                   }, 0);
                                 };
 
