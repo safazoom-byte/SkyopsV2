@@ -93,6 +93,7 @@ import {
   PieChart,
   ClipboardList,
   PlaneTakeoff,
+  Check,
 } from "lucide-react";
 import "./style.css";
 
@@ -248,6 +249,8 @@ const App: React.FC = () => {
   );
   const [quickLeaveType, setQuickLeaveType] = useState<LeaveType>("Day off");
   const [quickLeaveSearchTerm, setQuickLeaveSearchTerm] = useState("");
+  // Multi-entry queue: holds {date, type} pairs staged before final save
+  const [quickLeaveQueue, setQuickLeaveQueue] = useState<Array<{ id: string; date: string; type: LeaveType }>>([]); 
 
   const nonHiddenShifts = shifts.filter(s => !s.isHidden);
   // --- PREFERENCE PERSISTENCE EFFECTS ---
@@ -932,7 +935,7 @@ const App: React.FC = () => {
     // Process input text on button click
     let finalIds = [...quickLeaveStaffIds];
     if (quickLeaveSearchTerm.trim()) {
-      const tokens = quickLeaveSearchTerm.split(/[\\s,\n]+/);
+      const tokens = quickLeaveSearchTerm.split(/[\s,\n]+/);
       const remaining: string[] = [];
       tokens.forEach((token) => {
         if (!token) return;
@@ -948,18 +951,27 @@ const App: React.FC = () => {
 
     if (finalIds.length === 0) return;
 
-    // Validation: Check for overlapping leaves
+    // Build entries: use queue if it has items, otherwise single date range
+    const entriesToAdd: Array<{ date: string; endDate: string; type: LeaveType }> =
+      quickLeaveQueue.length > 0
+        ? quickLeaveQueue.map(q => ({ date: q.date, endDate: q.date, type: q.type }))
+        : [{ date: quickLeaveStartDate, endDate: quickLeaveEndDate, type: quickLeaveType }];
+
+    // Validation: Check for overlapping leaves across all queued entries
     const overlappingStaff: string[] = [];
     finalIds.forEach((id) => {
-      const hasOverlap = leaveRequests.some(
-        (l) =>
-          l.staffId === id &&
-          l.startDate <= quickLeaveEndDate &&
-          l.endDate >= quickLeaveStartDate,
-      );
-      if (hasOverlap) {
-        const st = staff.find((s) => s.id === id);
-        if (st) overlappingStaff.push(st.initials);
+      for (const entry of entriesToAdd) {
+        const hasOverlap = leaveRequests.some(
+          (l) =>
+            l.staffId === id &&
+            l.startDate <= entry.endDate &&
+            l.endDate >= entry.date,
+        );
+        if (hasOverlap) {
+          const st = staff.find((s) => s.id === id);
+          if (st && !overlappingStaff.includes(st.initials)) overlappingStaff.push(st.initials);
+          break;
+        }
       }
     });
 
@@ -970,13 +982,19 @@ const App: React.FC = () => {
       return;
     }
 
-    const newLeaves: LeaveRequest[] = finalIds.map((sid) => ({
-      id: crypto.randomUUID(),
-      staffId: sid,
-      startDate: quickLeaveStartDate,
-      endDate: quickLeaveEndDate,
-      type: quickLeaveType,
-    }));
+    // Build leave requests: one LeaveRequest per staff per queued entry
+    const newLeaves: LeaveRequest[] = [];
+    for (const sid of finalIds) {
+      for (const entry of entriesToAdd) {
+        newLeaves.push({
+          id: crypto.randomUUID(),
+          staffId: sid,
+          startDate: entry.date,
+          endDate: entry.endDate,
+          type: entry.type,
+        });
+      }
+    }
 
     setLeaveRequests((prev) => [...prev, ...newLeaves]);
     if (supabase) {
@@ -990,7 +1008,28 @@ const App: React.FC = () => {
     }
 
     setQuickLeaveStaffIds([]);
+    setQuickLeaveQueue([]);
     setNotification(`${newLeaves.length} Absence Entries Added`);
+  };
+
+  // Add a single date+type entry to the pending queue (does not save yet)
+  const addToQuickLeaveQueue = () => {
+    if (!quickLeaveStartDate) return;
+    // Allow adding each date individually — from-to range adds one entry per day
+    const startMs = new Date(`${quickLeaveStartDate}T00:00:00Z`).getTime();
+    const endMs = new Date(`${quickLeaveEndDate}T00:00:00Z`).getTime();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const newEntries: Array<{ id: string; date: string; type: LeaveType }> = [];
+    for (let ms = startMs; ms <= endMs; ms += dayMs) {
+      const dateStr = new Date(ms).toISOString().split("T")[0];
+      // Skip duplicates already in queue
+      if (!quickLeaveQueue.some(q => q.date === dateStr && q.type === quickLeaveType)) {
+        newEntries.push({ id: crypto.randomUUID(), date: dateStr, type: quickLeaveType });
+      }
+    }
+    if (newEntries.length > 0) {
+      setQuickLeaveQueue(prev => [...prev, ...newEntries]);
+    }
   };
 
   const deleteIncomingDuty = async (id: string) => {
@@ -1598,21 +1637,83 @@ const App: React.FC = () => {
                           <option value="Day off">Day off</option>
                           <option value="Annual leave">Annual leave</option>
                           <option value="Sick leave">Sick leave</option>
+                          <option value="Lieu leave">Lieu leave</option>
+                          <option value="Roster leave">Roster leave</option>
                         </select>
                       </div>
                       <div className="flex flex-col gap-1 justify-end">
                         <button
-                          onClick={addQuickLeave}
-                          disabled={
-                            quickLeaveStaffIds.length === 0 &&
-                            !quickLeaveSearchTerm.trim()
-                          }
-                          className="h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
+                          onClick={addToQuickLeaveQueue}
+                          disabled={!quickLeaveStartDate}
+                          className="h-[56px] bg-slate-100 border border-slate-200 text-slate-700 rounded-2xl font-black uppercase italic tracking-widest hover:bg-slate-200 disabled:opacity-40 transition-all flex items-center justify-center gap-2"
                         >
-                          <Plus size={16} /> Add Group Log
+                          <Plus size={16} /> + Queue
                         </button>
                       </div>
                     </div>
+
+                    {/* Multi-entry queue — shows staged date+type entries */}
+                    {quickLeaveQueue.length > 0 && (
+                      <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest">
+                            Queued — {quickLeaveQueue.length} entr{quickLeaveQueue.length > 1 ? "ies" : "y"} pending
+                          </span>
+                          <button
+                            onClick={() => setQuickLeaveQueue([])}
+                            className="text-[9px] font-black text-indigo-400 hover:text-indigo-700 uppercase tracking-wider"
+                          >
+                            Clear All
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {quickLeaveQueue.map((entry) => {
+                            const typeColor =
+                              entry.type === "Annual leave" ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
+                              entry.type === "Sick leave"   ? "bg-rose-100 text-rose-700 border-rose-200" :
+                              entry.type === "Lieu leave"   ? "bg-amber-100 text-amber-700 border-amber-200" :
+                              entry.type === "Roster leave" ? "bg-violet-100 text-violet-700 border-violet-200" :
+                                                              "bg-slate-100 text-slate-700 border-slate-200";
+                            return (
+                              <div
+                                key={entry.id}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[10px] font-black ${typeColor}`}
+                              >
+                                <span>{entry.date}</span>
+                                <span className="opacity-60 font-medium text-[9px]">{entry.type}</span>
+                                <button
+                                  onClick={() => setQuickLeaveQueue(prev => prev.filter(q => q.id !== entry.id))}
+                                  className="opacity-60 hover:opacity-100 transition-opacity"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <button
+                          onClick={addQuickLeave}
+                          disabled={quickLeaveStaffIds.length === 0 && !quickLeaveSearchTerm.trim()}
+                          className="w-full h-[48px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
+                        >
+                          <Check size={16} /> Save {quickLeaveQueue.length} Entr{quickLeaveQueue.length > 1 ? "ies" : "y"} for Selected Staff
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Fallback single-entry save when queue is empty */}
+                    {quickLeaveQueue.length === 0 && (
+                      <button
+                        onClick={addQuickLeave}
+                        disabled={
+                          quickLeaveStaffIds.length === 0 &&
+                          !quickLeaveSearchTerm.trim()
+                        }
+                        className="w-full h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
+                      >
+                        <Plus size={16} /> Add Group Log
+                      </button>
+                    )}
 
                     {/* Feedback List */}
                     <div className="pt-4 border-t border-slate-50">
