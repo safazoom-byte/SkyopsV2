@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, createPortal } from "react-dom/client";
 import "./style.css";
 import { polyfill } from "mobile-drag-drop";
 import { scrollBehaviourDragImageTranslateOverride } from "mobile-drag-drop/scroll-behaviour";
@@ -1181,7 +1181,7 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-40 xl:pb-12">
+      <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-48 xl:pb-12">
         {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
           <CommandCenter
             currentUser={userProfile}
@@ -2626,44 +2626,46 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Footer Navigation */}
-        
-      <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white opacity-100 border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[9999] pointer-events-auto select-none pb-safe">
-        <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar pointer-events-auto">
-        {[
-          { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
-          { id: "flights", icon: Plane, label: "Flights" },
-          { id: "staff", icon: Users, label: "Staff" },
-          { id: "shifts", icon: Clock, label: "Shifts" },
-          { id: "program", icon: CalendarDays, label: "Roster" },
-          { id: "reports", icon: ClipboardList, label: "Reports" },
-          { id: "statistics", icon: PieChart, label: "Stats" },
-          ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
-            ? [{ id: "command", icon: Shield, label: "Cmd" }]
-            : []),
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id as any)}
-            className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all min-w-[64px] ${
-              activeTab === item.id
-                ? item.id === "command"
-                  ? "text-emerald-600 bg-emerald-50 scale-110"
-                  : "text-blue-600 bg-blue-50 scale-110"
-                : "text-slate-400 hover:bg-slate-50"
-            }`}
-          >
-            <item.icon
-              size={20}
-              strokeWidth={activeTab === item.id ? 2.5 : 2}
-            />
-            <span className="text-[9px] font-black uppercase tracking-tight">
-              {item.label}
-            </span>
-          </button>
-        ))}
-        </nav>
-      </div>
+      {/* Mobile Footer Navigation — rendered via portal to body to escape any stacking context */}
+      {createPortal(
+        <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[99999] select-none pb-safe">
+          <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar">
+            {[
+              { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
+              { id: "flights", icon: Plane, label: "Flights" },
+              { id: "staff", icon: Users, label: "Staff" },
+              { id: "shifts", icon: Clock, label: "Shifts" },
+              { id: "program", icon: CalendarDays, label: "Roster" },
+              { id: "reports", icon: ClipboardList, label: "Reports" },
+              { id: "statistics", icon: PieChart, label: "Stats" },
+              ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
+                ? [{ id: "command", icon: Shield, label: "Cmd" }]
+                : []),
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id as any)}
+                className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all min-w-[64px] ${
+                  activeTab === item.id
+                    ? item.id === "command"
+                      ? "text-emerald-600 bg-emerald-50 scale-110"
+                      : "text-blue-600 bg-blue-50 scale-110"
+                    : "text-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                <item.icon
+                  size={20}
+                  strokeWidth={activeTab === item.id ? 2.5 : 2}
+                />
+                <span className="text-[9px] font-black uppercase tracking-tight">
+                  {item.label}
+                </span>
+              </button>
+            ))}
+          </nav>
+        </div>,
+        document.body
+      )}
 
       
 
