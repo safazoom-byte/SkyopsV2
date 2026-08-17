@@ -103,6 +103,10 @@ export const ProgramDisplay: React.FC<Props> = ({
   >("Daily");
   const [unlockAbsences, setUnlockAbsences] = useState(false);
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [versionNameModal, setVersionNameModal] = useState<{open: boolean, name: string}>({open: false, name: ""});
+  const [jumpDate, setJumpDate] = useState<string | null>(null);
+  const jumpRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
 
   const [referencePrograms, setReferencePrograms] = useState<DailyProgram[]>(programs);
 
@@ -368,17 +372,18 @@ export const ProgramDisplay: React.FC<Props> = ({
     loadVersions();
   }, []);
 
-  const saveVersion = async () => {
-    const name = prompt(
-      "Enter a name for this version (e.g., 'Draft 1', 'Final Approval'):",
-      `Version ${versions.length + 1}`,
-    );
-    if (!name) return;
+  const saveVersion = () => {
+    setVersionNameModal({ open: true, name: `Version ${versions.length + 1}` });
+  };
+
+  const confirmSaveVersion = async (name: string) => {
+    if (!name.trim()) return;
+    setVersionNameModal({ open: false, name: "" });
 
     const newVersion: ProgramVersion = {
       id: crypto.randomUUID(),
       versionNumber: versions.length + 1,
-      name,
+      name: name.trim(),
       createdAt: new Date().toISOString(),
       periodStart: startDate,
       periodEnd: endDate,
@@ -389,17 +394,12 @@ export const ProgramDisplay: React.FC<Props> = ({
 
     let updatedVersions = [newVersion, ...versions];
     const versionsToDelete = updatedVersions.slice(10);
-    
-    if (updatedVersions.length > 10) {
-      updatedVersions = updatedVersions.slice(0, 10);
-    }
+    if (updatedVersions.length > 10) updatedVersions = updatedVersions.slice(0, 10);
     setVersions(updatedVersions);
-    
+
     if (supabase) {
       await db.saveProgramVersion(newVersion);
-      for (const old of versionsToDelete) {
-        await db.deleteProgramVersion(old.id);
-      }
+      for (const old of versionsToDelete) await db.deleteProgramVersion(old.id);
     }
   };
 
@@ -3498,92 +3498,160 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   return (
-    <div className="space-y-8 pb-24 animate-in fade-in duration-500">
-      <div className="bg-slate-950 text-white p-6 md:p-10 rounded-3xl shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-4 md:gap-6 relative z-10 flex-col md:flex-row text-center md:text-left">
-          <div className="w-12 h-12 md:w-16 md:h-16 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20">
-            <CalendarDays size={24} className="md:w-8 md:h-8" />
-          </div>
-          <div>
-            <h3 className="text-2xl md:text-3xl font-black uppercase italic tracking-tighter text-white leading-none">
-              Master Roster
-            </h3>
-            <p className="text-slate-400 text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] mt-2">
-              Program View & Export
-            </p>
+    <div className="space-y-6 pb-24 animate-in fade-in duration-500">
+
+      {/* ── VERSION NAME MODAL ── */}
+      {versionNameModal.open && (
+        <div className="fixed inset-0 z-[8000] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4" onClick={() => setVersionNameModal({open:false,name:""})}>
+          <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black uppercase italic text-slate-900 mb-1">Save Version</h3>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-5">Give this snapshot a name</p>
+            <input
+              autoFocus
+              type="text"
+              value={versionNameModal.name}
+              onChange={e => setVersionNameModal(v => ({...v, name: e.target.value}))}
+              onKeyDown={e => { if (e.key === "Enter") confirmSaveVersion(versionNameModal.name); if (e.key === "Escape") setVersionNameModal({open:false,name:""}); }}
+              className="w-full px-4 py-3 border-2 border-slate-200 rounded-2xl text-sm font-bold text-slate-900 focus:outline-none focus:border-blue-500 mb-4"
+              placeholder="e.g. Draft 1, Final Approval…"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setVersionNameModal({open:false,name:""})} className="flex-1 py-3 rounded-2xl font-black uppercase text-xs text-slate-500 bg-slate-100 hover:bg-slate-200 transition-colors">Cancel</button>
+              <button onClick={() => confirmSaveVersion(versionNameModal.name)} className="flex-1 py-3 rounded-2xl font-black uppercase text-xs text-white bg-blue-600 hover:bg-blue-500 transition-colors flex items-center justify-center gap-2"><Save size={14}/> Save</button>
+            </div>
           </div>
         </div>
-        <div className="flex gap-4 relative z-10 flex-wrap justify-end mt-4 md:mt-0">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={`px-4 md:px-6 py-4 md:py-5 rounded-2xl font-black uppercase tracking-widest text-xs transition-all shadow-xl flex items-center gap-3 active:scale-95 ${showHistory ? "bg-emerald-500 text-white" : "bg-white text-slate-950 hover:bg-slate-100"}`}
-          >
-            <History size={18} />
-            <span className="hidden md:inline">Time Machine</span>
-          </button>
-          <button
-            onClick={saveVersion}
-            className="px-4 md:px-6 py-4 md:py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all shadow-xl flex items-center gap-3 active:scale-95"
-          >
-            <Save size={18} />
-            <span className="hidden md:inline">Save Ver</span>
-          </button>
-          <button
-            onClick={generateFullReport}
-            disabled={isGeneratingPdf || activePrograms.length === 0}
-            className="px-4 md:px-8 py-4 md:py-5 bg-white text-slate-950 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 hover:text-white transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
-            title="Export Internal Full Report PDF"
-          >
-            {isGeneratingPdf ? (
-              <Printer size={18} className="animate-spin" />
-            ) : (
-              <FileDown size={18} />
-            )}
-            <span className="hidden md:inline">Internal PDF</span>
-          </button>
-          <button
-            onClick={() => {
-              setTempPrep(periodPreparedBy);
-              setTempRev(periodRevisedBy);
-              setTempMinOff(minOffDayHours.toString());
-              setTempMaxOff(maxOffDayHours.toString());
-              setTempHideDrivers(hideDriversOffDuty);
-              setTempHideLabour(hideLabourOffDuty);
-              setTempHideSecurity(hideSecurityOffDuty);
-              setTempHideAccountants(hideAccountantsOffDuty);
-              setShowSettingsModal(true);
-            }}
-            className="px-4 md:px-8 py-4 md:py-5 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95"
-            title="Program & Off-Day Settings"
-          >
-            <Settings size={18} />
-            <span>Settings</span>
-          </button>
-          <button
-            onClick={generateStaffExcelReport}
-            disabled={isGeneratingExcel || activePrograms.length === 0}
-            className="px-4 md:px-8 py-4 md:py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-500 transition-all shadow-xl flex items-center gap-2 md:gap-3 active:scale-95 disabled:opacity-50"
-          >
-            {isGeneratingExcel ? (
-              <Printer size={18} className="animate-spin" />
-            ) : (
-              <FileDown size={18} />
-            )}
-            <span>Staff EXCEL</span>
-          </button>
+      )}
+
+      {/* ── HEADER ── */}
+      <div className="bg-slate-950 text-white px-6 py-5 md:px-10 md:py-7 rounded-3xl shadow-2xl">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Title */}
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20 shrink-0">
+              <CalendarDays size={22} />
+            </div>
+            <div>
+              <h3 className="text-2xl font-black uppercase italic tracking-tighter text-white leading-none">Master Roster</h3>
+              <p className="text-slate-400 text-[9px] font-black uppercase tracking-[0.2em] mt-1">Program View & Export · {startDate} → {endDate}</p>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`px-4 py-3 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center gap-2 active:scale-95 ${showHistory ? "bg-emerald-500 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+            >
+              <History size={15} /><span className="hidden sm:inline">History</span>
+            </button>
+            <button
+              onClick={saveVersion}
+              className="px-4 py-3 bg-blue-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-400 transition-all flex items-center gap-2 active:scale-95"
+            >
+              <Save size={15} /><span className="hidden sm:inline">Save</span>
+            </button>
+            <button
+              onClick={() => {
+                setTempPrep(periodPreparedBy); setTempRev(periodRevisedBy);
+                setTempMinOff(minOffDayHours.toString()); setTempMaxOff(maxOffDayHours.toString());
+                setTempHideDrivers(hideDriversOffDuty); setTempHideLabour(hideLabourOffDuty);
+                setTempHideSecurity(hideSecurityOffDuty); setTempHideAccountants(hideAccountantsOffDuty);
+                setShowSettingsModal(true);
+              }}
+              className="px-4 py-3 bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-400 transition-all flex items-center gap-2 active:scale-95"
+            >
+              <Settings size={15} /><span className="hidden sm:inline">Settings</span>
+            </button>
+            {/* Export dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(v => !v)}
+                className="px-4 py-3 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 transition-all flex items-center gap-2 active:scale-95"
+              >
+                <FileDown size={15} /><span className="hidden sm:inline">Export</span>
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden min-w-[180px]" onMouseLeave={() => setShowExportMenu(false)}>
+                  <button
+                    onClick={() => { setShowExportMenu(false); generateFullReport(); }}
+                    disabled={isGeneratingPdf || activePrograms.length === 0}
+                    className="w-full px-5 py-3.5 flex items-center gap-3 text-xs font-black uppercase text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 border-b border-slate-100"
+                  >
+                    {isGeneratingPdf ? <Printer size={14} className="animate-spin" /> : <FileDown size={14} />}
+                    Internal PDF
+                  </button>
+                  <button
+                    onClick={() => { setShowExportMenu(false); generateStaffExcelReport(); }}
+                    disabled={isGeneratingExcel || activePrograms.length === 0}
+                    className="w-full px-5 py-3.5 flex items-center gap-3 text-xs font-black uppercase text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40"
+                  >
+                    {isGeneratingExcel ? <Printer size={14} className="animate-spin" /> : <FileDown size={14} />}
+                    Excel Report
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 md:gap-4 md:justify-center px-2">
-        {["Daily", "Program Check", "Matrix", "Roles", "Staff Checks"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab as any)}
-            className={`px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex-1 md:flex-none ${activeTab === tab ? "bg-slate-950 text-white shadow-xl scale-105" : "bg-white text-slate-500 hover:bg-slate-50 border border-slate-200"}`}
-          >
-            {tab} View
-          </button>
-        ))}
+      {/* ── STICKY TAB BAR ── */}
+      <div className="sticky top-[68px] z-[400] bg-slate-50/90 backdrop-blur-md pt-2 pb-3 -mx-2 px-2 md:-mx-4 md:px-4">
+        <div className="flex gap-1.5 bg-white border border-slate-200 rounded-2xl p-1.5 shadow-sm overflow-x-auto no-scrollbar">
+          {([
+            { id: "Daily",         icon: CalendarDays,   label: "Daily"   },
+            { id: "Program Check", icon: CheckCircle2,   label: "Check"   },
+            { id: "Matrix",        icon: Users,          label: "Matrix"  },
+            { id: "Roles",         icon: ShieldCheck,    label: "Roles"   },
+            { id: "Staff Checks",  icon: AlertTriangle,  label: "Staff"   },
+          ] as const).map(({ id, icon: Icon, label }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id as any)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap flex-1 justify-center ${
+                activeTab === id
+                  ? "bg-slate-950 text-white shadow-md"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+              }`}
+            >
+              <Icon size={13} />{label}
+            </button>
+          ))}
+        </div>
+
+        {/* Date jump pills — only on Daily tab */}
+        {activeTab === "Daily" && activePrograms.length > 1 && (
+          <div className="flex gap-1.5 mt-2 overflow-x-auto no-scrollbar pb-0.5">
+            {activePrograms.map((p) => {
+              const d = new Date(`${p.dateString || startDate}T12:00:00Z`);
+              const dayNames = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+              const dayName = dayNames[d.getUTCDay()];
+              const dateNum = d.getUTCDate();
+              const isActive = jumpDate === p.dateString;
+              const workCount = new Set(p.assignments.map(a => a.staffId)).size;
+              return (
+                <button
+                  key={p.dateString}
+                  onClick={() => {
+                    setJumpDate(p.dateString || null);
+                    const el = jumpRefs.current[p.dateString || ""];
+                    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={`flex flex-col items-center px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition-all shrink-0 border ${
+                    isActive
+                      ? "bg-slate-950 text-white border-slate-950 shadow-md"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-400 hover:text-slate-800"
+                  }`}
+                >
+                  <span className="tracking-wider">{dayName}</span>
+                  <span className="text-sm leading-none font-black">{dateNum}</span>
+                  <span className={`mt-0.5 ${isActive ? "text-emerald-400" : "text-slate-400"}`}>{workCount}w</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
 
@@ -3833,33 +3901,47 @@ export const ProgramDisplay: React.FC<Props> = ({
                   return (
                     <div
                       key={i}
+                      ref={el => { jumpRefs.current[prog.dateString || ""] = el; }}
                       className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden"
                     >
-                      <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <h3 className="text-lg font-black uppercase italic text-slate-900">
+                      <div className="px-5 py-4 border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <h3 className="text-base font-black uppercase italic text-white tracking-tight">
                           {dateLabel}
                         </h3>
-                        <div className="flex flex-wrap gap-2 text-[9px] font-black uppercase tracking-widest">
-                          <span className="px-2 py-1 bg-slate-900 text-white rounded-md">
-                            Total: {staff.length}
+                        <div className="flex flex-wrap gap-1.5 text-[8px] font-black uppercase tracking-widest">
+                          <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 rounded-lg border border-emerald-500/30">
+                            ✦ {workingIds.size} Working
                           </span>
-                          <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md">
-                            Work: {workingIds.size}
-                          </span>
-                          <span className="px-2 py-1 bg-slate-200 text-slate-700 rounded-md">
-                            Off: {categories["DAYS OFF"].length}
-                          </span>
-                          <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-md">
-                            Leave:{" "}
-                            {categories["ANNUAL LEAVE"].length +
-                              categories["SICK LEAVE"].length}
-                          </span>
-                          <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-md">
-                            SBY: {categories["STANDBY (RESERVE)"].length}
-                          </span>
-                          <span className="px-2 py-1 bg-rose-100 text-rose-700 rounded-md">
-                            Roster Off: {categories["ROSTER LEAVE"].length}
-                          </span>
+                          {categories["DAYS OFF"].length > 0 && (
+                            <span className="px-2.5 py-1 bg-slate-500/30 text-slate-300 rounded-lg border border-slate-500/30">
+                              ◎ {categories["DAYS OFF"].length} Day Off
+                            </span>
+                          )}
+                          {(categories["ANNUAL LEAVE"].length + categories["SICK LEAVE"].length) > 0 && (
+                            <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 rounded-lg border border-indigo-500/30">
+                              ✈ {categories["ANNUAL LEAVE"].length + categories["SICK LEAVE"].length} Leave
+                            </span>
+                          )}
+                          {categories["ANNUAL LEAVE"].length > 0 && (
+                            <span className="px-2.5 py-1 bg-yellow-500/20 text-yellow-300 rounded-lg border border-yellow-500/30">
+                              AL·{categories["ANNUAL LEAVE"].length}
+                            </span>
+                          )}
+                          {categories["SICK LEAVE"].length > 0 && (
+                            <span className="px-2.5 py-1 bg-rose-500/20 text-rose-300 rounded-lg border border-rose-500/30">
+                              SL·{categories["SICK LEAVE"].length}
+                            </span>
+                          )}
+                          {categories["STANDBY (RESERVE)"].length > 0 && (
+                            <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-lg border border-amber-500/30">
+                              ⏸ {categories["STANDBY (RESERVE)"].length} SBY
+                            </span>
+                          )}
+                          {categories["ROSTER LEAVE"].length > 0 && (
+                            <span className="px-2.5 py-1 bg-purple-500/20 text-purple-300 rounded-lg border border-purple-500/30">
+                              RL·{categories["ROSTER LEAVE"].length}
+                            </span>
+                          )}
                         </div>
                       </div>
 
