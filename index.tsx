@@ -1123,23 +1123,23 @@ const App: React.FC = () => {
         </div>
         <div className="flex items-center gap-2 md:gap-4">
           {/* Top Desktop & Tablet Nav — visible on 768px and above */}
-          <nav className="hidden md:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
+          <nav className="hidden md:flex items-center gap-1.5 p-1.5 bg-slate-100/90 border border-slate-200/60 rounded-2xl shadow-inner">
             {[
               { id: "dashboard", label: "Dashboard" },
               { id: "flights", label: "Flights" },
               { id: "staff", label: "Staff" },
               { id: "shifts", label: "Shifts" },
-              { id: "program", label: "Program" },
+              { id: "program", label: "Master Roster" },
               { id: "reports", label: "Reports" },
               { id: "statistics", label: "Statistics" },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3 lg:px-5 py-2 lg:py-2.5 rounded-xl text-[9px] font-black uppercase italic transition-all ${
+                className={`px-4 lg:px-6 py-2.5 lg:py-3 rounded-xl text-[10px] lg:text-xs font-black uppercase italic tracking-wider transition-all cursor-pointer ${
                   activeTab === tab.id
-                    ? "bg-slate-950 text-white shadow-md scale-105"
-                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                    ? "bg-slate-950 text-white shadow-md scale-[1.03]"
+                    : "text-slate-600 hover:text-slate-950 hover:bg-white/80"
                 }`}
               >
                 {tab.label}
@@ -1148,13 +1148,13 @@ const App: React.FC = () => {
             {(userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
               <button
                 onClick={() => setActiveTab("command")}
-                className={`px-3 lg:px-5 py-2 lg:py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 transition-all ${
+                className={`px-4 lg:px-6 py-2.5 lg:py-3 rounded-xl text-[10px] lg:text-xs font-black uppercase italic flex items-center gap-1.5 tracking-wider transition-all cursor-pointer ${
                   activeTab === "command"
-                    ? "bg-emerald-600 text-white shadow-md scale-105"
-                    : "text-emerald-600 hover:bg-emerald-50"
+                    ? "bg-emerald-600 text-white shadow-md scale-[1.03]"
+                    : "text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700"
                 }`}
               >
-                <Shield size={12} /> Command
+                <Shield size={14} /> Command
               </button>
             )}
           </nav>
@@ -2709,26 +2709,26 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Mobile Footer Navigation — rendered via portal to body */}
+      {/* Mobile Footer Navigation — only visible on screens under 768px */}
       {createPortal(
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.15)] z-[999999] select-none pb-safe">
-          <nav className="flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto no-scrollbar scroll-smooth">
+          <nav className="flex items-center justify-around gap-1 p-1.5 px-2 overflow-x-auto no-scrollbar scroll-smooth">
             {[
-              { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+              { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
               { id: "flights", icon: Plane, label: "Flights" },
               { id: "staff", icon: Users, label: "Staff" },
               { id: "shifts", icon: Clock, label: "Shifts" },
-              { id: "program", icon: CalendarDays, label: "Master Roster" },
+              { id: "program", icon: CalendarDays, label: "Roster" },
               { id: "reports", icon: ClipboardList, label: "Reports" },
-              { id: "statistics", icon: PieChart, label: "Statistics" },
+              { id: "statistics", icon: PieChart, label: "Stats" },
               ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
-                ? [{ id: "command", icon: Shield, label: "Command" }]
+                ? [{ id: "command", icon: Shield, label: "Cmd" }]
                 : []),
             ].map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
+                className={`flex flex-col items-center justify-center gap-1 p-1.5 rounded-xl transition-all cursor-pointer flex-1 min-w-0 ${
                   activeTab === item.id
                     ? item.id === "command"
                       ? "text-emerald-600 bg-emerald-50 scale-105"
@@ -2740,7 +2740,7 @@ const App: React.FC = () => {
                   size={18}
                   strokeWidth={activeTab === item.id ? 2.5 : 2}
                 />
-                <span className="text-[9px] font-black uppercase tracking-tight whitespace-nowrap">
+                <span className="text-[8px] font-black uppercase tracking-tight truncate w-full text-center">
                   {item.label}
                 </span>
               </button>
