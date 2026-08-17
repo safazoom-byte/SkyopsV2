@@ -129,6 +129,7 @@ export const FlightManager: React.FC<Props> = ({
       std: "",
       date: dateValue,
       type: "Turnaround",
+      isFerry: false,
     });
   };
 
@@ -469,6 +470,11 @@ export const FlightManager: React.FC<Props> = ({
                             }
                             return null;
                           })()}
+                          {flight.isFerry && (
+                            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md text-[8px] md:text-[10px] font-black uppercase tracking-widest border border-amber-200">
+                              Ferry Out
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest">
                           <MapPin size={10} className="text-slate-300" />
