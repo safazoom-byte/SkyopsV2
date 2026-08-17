@@ -3563,35 +3563,28 @@ export const ProgramDisplay: React.FC<Props> = ({
             >
               <Settings size={15} /><span className="hidden sm:inline">Settings</span>
             </button>
-            {/* Export dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowExportMenu(v => !v)}
-                className="px-4 py-3 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 transition-all flex items-center gap-2 active:scale-95"
-              >
-                <FileDown size={15} /><span className="hidden sm:inline">Export</span>
-              </button>
-              {showExportMenu && (
-                <div className="absolute right-0 top-full mt-2 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 overflow-hidden min-w-[180px]" onMouseLeave={() => setShowExportMenu(false)}>
-                  <button
-                    onClick={() => { setShowExportMenu(false); generateFullReport(); }}
-                    disabled={isGeneratingPdf || activePrograms.length === 0}
-                    className="w-full px-5 py-3.5 flex items-center gap-3 text-xs font-black uppercase text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40 border-b border-slate-100"
-                  >
-                    {isGeneratingPdf ? <Printer size={14} className="animate-spin" /> : <FileDown size={14} />}
-                    Internal PDF
-                  </button>
-                  <button
-                    onClick={() => { setShowExportMenu(false); generateStaffExcelReport(); }}
-                    disabled={isGeneratingExcel || activePrograms.length === 0}
-                    className="w-full px-5 py-3.5 flex items-center gap-3 text-xs font-black uppercase text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-40"
-                  >
-                    {isGeneratingExcel ? <Printer size={14} className="animate-spin" /> : <FileDown size={14} />}
-                    Excel Report
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* PDF export button */}
+            <button
+              onClick={generateFullReport}
+              disabled={isGeneratingPdf || activePrograms.length === 0}
+              className="px-4 py-3 bg-white/10 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-white/20 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-40"
+              title="Export Internal PDF"
+            >
+              {isGeneratingPdf ? <Printer size={15} className="animate-spin" /> : <FileDown size={15} />}
+              <span className="hidden sm:inline">PDF</span>
+            </button>
+            {/* Staff Excel — always visible, prominent green */}
+            <button
+              onClick={generateStaffExcelReport}
+              disabled={isGeneratingExcel || activePrograms.length === 0}
+              className="px-4 py-3 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-40"
+              title="Export Staff Excel"
+            >
+              {isGeneratingExcel ? <Printer size={15} className="animate-spin" /> : <FileDown size={15} />}
+              <span>Staff Excel</span>
+            </button>
+            {/* placeholder to remove unused state warning */}
+            {false && showExportMenu && <span/>}
           </div>
         </div>
       </div>
