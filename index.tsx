@@ -96,6 +96,7 @@ import {
   PlaneTakeoff,
   Check,
   Award,
+  Menu,
 } from "lucide-react";
 import "./style.css";
 
@@ -144,6 +145,7 @@ const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     | "dashboard"
     | "flights"
@@ -1119,9 +1121,9 @@ const App: React.FC = () => {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          {/* Desktop Nav */}
-          <nav className="hidden xl:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
+        <div className="flex items-center gap-2 md:gap-4">
+          {/* Top Desktop & Tablet Nav — visible on 768px and above */}
+          <nav className="hidden md:flex items-center gap-1 p-1 bg-slate-100 rounded-2xl">
             {[
               { id: "dashboard", label: "Dashboard" },
               { id: "flights", label: "Flights" },
@@ -1134,7 +1136,11 @@ const App: React.FC = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-5 py-2.5 rounded-xl text-[9px] font-black uppercase italic ${activeTab === tab.id ? "bg-slate-950 text-white shadow-md" : "text-slate-500"}`}
+                className={`px-3 lg:px-5 py-2 lg:py-2.5 rounded-xl text-[9px] font-black uppercase italic transition-all ${
+                  activeTab === tab.id
+                    ? "bg-slate-950 text-white shadow-md scale-105"
+                    : "text-slate-500 hover:text-slate-900 hover:bg-white"
+                }`}
               >
                 {tab.label}
               </button>
@@ -1142,12 +1148,25 @@ const App: React.FC = () => {
             {(userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
               <button
                 onClick={() => setActiveTab("command")}
-                className={`px-6 py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 ${activeTab === "command" ? "bg-emerald-600 text-white shadow-md" : "text-emerald-600 hover:bg-emerald-50"}`}
+                className={`px-3 lg:px-5 py-2 lg:py-2.5 rounded-xl text-[9px] font-black uppercase italic flex items-center gap-1.5 transition-all ${
+                  activeTab === "command"
+                    ? "bg-emerald-600 text-white shadow-md scale-105"
+                    : "text-emerald-600 hover:bg-emerald-50"
+                }`}
               >
                 <Shield size={12} /> Command
               </button>
             )}
           </nav>
+
+          {/* Mobile Hamburger Toggle (under 768px) */}
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="md:hidden p-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors"
+            title="Toggle Menu"
+          >
+            {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
           <button
             onClick={() => { setIsChangePasswordOpen(true); setChangePasswordMessage(""); setNewPassword(""); }}
             className="p-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-blue-50 hover:text-blue-500 transition-colors"
@@ -2645,10 +2664,55 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Footer Navigation — rendered via portal to body to escape any stacking context */}
+      {/* Mobile Top Menu Overlay Dropdown */}
+      {isMobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-[99998] bg-slate-950/60 backdrop-blur-sm animate-in fade-in"
+          onClick={() => setIsMobileMenuOpen(false)}
+        >
+          <div
+            className="bg-white border-b border-slate-200 shadow-2xl p-6 pt-24 space-y-2 rounded-b-3xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 px-2">Navigation</p>
+            {[
+              { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+              { id: "flights", icon: Plane, label: "Flights" },
+              { id: "staff", icon: Users, label: "Staff" },
+              { id: "shifts", icon: Clock, label: "Shifts" },
+              { id: "program", icon: CalendarDays, label: "Master Roster" },
+              { id: "reports", icon: ClipboardList, label: "Reports" },
+              { id: "statistics", icon: PieChart, label: "Statistics" },
+              ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
+                ? [{ id: "command", icon: Shield, label: "Command Center" }]
+                : []),
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id as any);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 p-3.5 rounded-2xl font-black uppercase text-xs tracking-wider transition-all ${
+                  activeTab === item.id
+                    ? item.id === "command"
+                      ? "bg-emerald-600 text-white shadow-lg"
+                      : "bg-slate-950 text-white shadow-lg"
+                    : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                <item.icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Footer Navigation — rendered via portal to body */}
       {createPortal(
-        <div className="xl:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] z-[99999] select-none pb-safe">
-          <nav className="flex justify-between items-center overflow-x-auto gap-2 p-2 px-4 pb-2 no-scrollbar">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.15)] z-[999999] select-none pb-safe">
+          <nav className="flex justify-around items-center gap-1 p-1.5 px-2 pb-2 overflow-x-auto no-scrollbar">
             {[
               { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
               { id: "flights", icon: Plane, label: "Flights" },
@@ -2664,19 +2728,19 @@ const App: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex flex-col items-center gap-1 p-3 rounded-2xl transition-all min-w-[64px] ${
+                className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl transition-all cursor-pointer flex-1 min-w-0 ${
                   activeTab === item.id
                     ? item.id === "command"
-                      ? "text-emerald-600 bg-emerald-50 scale-110"
-                      : "text-blue-600 bg-blue-50 scale-110"
+                      ? "text-emerald-600 bg-emerald-50 scale-105"
+                      : "text-blue-600 bg-blue-50 scale-105"
                     : "text-slate-400 hover:bg-slate-50"
                 }`}
               >
                 <item.icon
-                  size={20}
+                  size={18}
                   strokeWidth={activeTab === item.id ? 2.5 : 2}
                 />
-                <span className="text-[9px] font-black uppercase tracking-tight">
+                <span className="text-[8px] font-black uppercase tracking-tight truncate w-full text-center">
                   {item.label}
                 </span>
               </button>
