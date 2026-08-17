@@ -2712,35 +2712,35 @@ const App: React.FC = () => {
       {/* Mobile Footer Navigation — rendered via portal to body */}
       {createPortal(
         <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.15)] z-[999999] select-none pb-safe">
-          <nav className="flex justify-around items-center gap-1 p-1.5 px-2 pb-2 overflow-x-auto no-scrollbar">
+          <nav className="flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto no-scrollbar scroll-smooth">
             {[
-              { id: "dashboard", icon: LayoutDashboard, label: "Dash" },
+              { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
               { id: "flights", icon: Plane, label: "Flights" },
               { id: "staff", icon: Users, label: "Staff" },
               { id: "shifts", icon: Clock, label: "Shifts" },
-              { id: "program", icon: CalendarDays, label: "Roster" },
+              { id: "program", icon: CalendarDays, label: "Master Roster" },
               { id: "reports", icon: ClipboardList, label: "Reports" },
-              { id: "statistics", icon: PieChart, label: "Stats" },
+              { id: "statistics", icon: PieChart, label: "Statistics" },
               ...((userProfile?.role === "super_admin" || userProfile?.role === "admin")
-                ? [{ id: "command", icon: Shield, label: "Cmd" }]
+                ? [{ id: "command", icon: Shield, label: "Command" }]
                 : []),
             ].map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id as any)}
-                className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl transition-all cursor-pointer flex-1 min-w-0 ${
+                className={`flex flex-col items-center justify-center gap-1 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0 ${
                   activeTab === item.id
                     ? item.id === "command"
                       ? "text-emerald-600 bg-emerald-50 scale-105"
-                      : "text-blue-600 bg-blue-50 scale-105"
-                    : "text-slate-400 hover:bg-slate-50"
+                      : "text-blue-600 bg-blue-50 scale-105 shadow-sm"
+                    : "text-slate-400 hover:bg-slate-50 hover:text-slate-700"
                 }`}
               >
                 <item.icon
                   size={18}
                   strokeWidth={activeTab === item.id ? 2.5 : 2}
                 />
-                <span className="text-[8px] font-black uppercase tracking-tight truncate w-full text-center">
+                <span className="text-[9px] font-black uppercase tracking-tight whitespace-nowrap">
                   {item.label}
                 </span>
               </button>

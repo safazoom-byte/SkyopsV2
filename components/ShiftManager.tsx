@@ -724,54 +724,54 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
             </p>
           </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto relative z-10">
+        <div className="grid grid-cols-2 sm:flex sm:flex-row gap-2 md:gap-3 w-full md:w-auto relative z-10">
           <button
             onClick={toggleAutoLink}
-            className={`flex-1 px-6 py-4 md:px-8 md:py-5 rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl ${
+            className={`p-3 md:px-6 md:py-4 rounded-xl md:rounded-2xl flex items-center justify-center gap-2 md:gap-3 transition-all group shadow-md ${
               isAutoLinkEnabled
                 ? "bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20"
                 : "bg-slate-800 hover:bg-slate-700 text-slate-300 shadow-slate-900/20"
             }`}
           >
             <Zap
-              size={16}
-              className={`transition-transform ${isAutoLinkEnabled ? "text-yellow-300 group-hover:scale-110" : "text-slate-500"}`}
+              size={15}
+              className={`transition-transform shrink-0 ${isAutoLinkEnabled ? "text-yellow-300 group-hover:scale-110" : "text-slate-500"}`}
             />
             <div className="flex flex-col items-start text-left">
-              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic leading-none">
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic leading-none whitespace-nowrap">
                 Auto-Link
               </span>
               <span
-                className={`text-[7px] font-bold uppercase tracking-wider mt-1 ${isAutoLinkEnabled ? "text-blue-200" : "text-slate-500"}`}
+                className={`text-[7px] font-bold uppercase tracking-wider mt-0.5 ${isAutoLinkEnabled ? "text-blue-200" : "text-slate-500"}`}
               >
-                {isAutoLinkEnabled ? "Active" : "Disabled"}
+                {isAutoLinkEnabled ? "Active" : "Off"}
               </span>
             </div>
           </button>
           <button
             onClick={() => setShowBulkModal(true)}
-            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-amber-500/20"
+            className="p-3 md:px-6 md:py-4 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl md:rounded-2xl flex items-center justify-center gap-2 md:gap-3 transition-all group shadow-md shadow-amber-500/20"
           >
             <Layers
-              size={16}
-              className="group-hover:scale-110 transition-transform"
+              size={15}
+              className="group-hover:scale-110 transition-transform shrink-0"
             />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">
-              Master Template
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic whitespace-nowrap">
+              Template
             </span>
           </button>
-          <button className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center gap-3 hover:bg-white/10 transition-all">
-            <FileDown size={18} className="text-emerald-400" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-white">
+          <button className="p-3 md:px-6 md:py-4 bg-white/5 border border-white/10 rounded-xl md:rounded-2xl flex items-center justify-center gap-2 md:gap-3 hover:bg-white/10 transition-all text-white">
+            <FileDown size={15} className="text-emerald-400 shrink-0" />
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
               Report
             </span>
           </button>
           <button
             onClick={() => setShowAutoScheduleModal(true)}
-            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-indigo-500/20"
+            className="p-3 md:px-6 md:py-4 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 md:gap-3 transition-all group shadow-md shadow-indigo-500/20"
           >
-            <Bot size={16} className="group-hover:scale-110 transition-transform" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">
+            <Bot size={15} className="group-hover:scale-110 transition-transform shrink-0" />
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic whitespace-nowrap">
               Auto Schedule
             </span>
           </button>
@@ -781,10 +781,10 @@ const calculateShiftDuration = (shift: ShiftConfig) => {
               resetForm();
               setIsFormOpen(true);
             }}
-            className="flex-1 px-6 py-4 md:px-8 md:py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl flex items-center justify-center gap-3 transition-all group shadow-xl shadow-blue-600/20"
+            className="col-span-2 sm:col-span-1 p-3 md:px-6 md:py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 md:gap-3 transition-all group shadow-md shadow-blue-600/20"
           >
-            <Plus size={16} className="group-hover:scale-110 transition-transform" />
-            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic">
+            <Plus size={15} className="group-hover:scale-110 transition-transform shrink-0" />
+            <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest italic whitespace-nowrap">
               New Duty
             </span>
           </button>

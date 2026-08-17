@@ -4027,8 +4027,8 @@ export const ProgramDisplay: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
+                      <div className="overflow-x-auto w-full">
+                        <table className="w-full min-w-[850px] text-left border-collapse">
                           <thead>
                             <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
                               <th className="px-4 py-3 w-12 text-center">
