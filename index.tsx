@@ -1186,20 +1186,6 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full p-2 sm:p-4 md:p-12 pb-48 xl:pb-12">
-        {activeTab === "command" && (userProfile?.role === "super_admin" || userProfile?.role === "admin") && (
-          <CommandCenter
-            currentUser={userProfile}
-            flights={flights}
-            shifts={nonHiddenShifts}
-            startDate={startDate}
-            endDate={endDate}
-            staff={staff}
-            onUpdateStaff={(s) => {
-              setStaff((prev) => prev.map((item) => (item.id === s.id ? s : item)));
-              db.upsertStaff(s);
-            }}
-          />
-        )}
         {activeTab === "dashboard" && (() => {
           const activeFlights = flights.filter(f => f.date && f.date >= startDate && f.date <= endDate);
           const activeShifts = nonHiddenShifts.filter(s => s.pickupDate >= startDate && s.pickupDate <= endDate);
