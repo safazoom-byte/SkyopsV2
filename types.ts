@@ -37,6 +37,7 @@ export interface Flight {
   type: "Arrival" | "Departure" | "Turnaround";
   priority: "High" | "Standard" | "Low";
   aircraftType?: string;
+  isFerry?: boolean; // Ferry flight — no passengers, skip CKI
 }
 
 export interface Staff {
@@ -121,6 +122,19 @@ export interface OffDutyRecord {
   type: LeaveType;
 }
 
+export interface CkiDestOverride {
+  code: string;           // IATA destination code e.g. "DXB"
+  minutesBefore: number;  // minutes before STD to open counter
+}
+
+export interface CkiConfig {
+  enabled: boolean;
+  intlMinutesBefore: number;     // default for international flights
+  domMinutesBefore: number;      // default for domestic flights
+  domesticCodes: string[];       // IATA codes treated as domestic e.g. ["CAI","LXR"]
+  overrides: CkiDestOverride[];  // per-destination overrides (take priority)
+}
+
 export interface PeriodSettings {
   preparedBy?: string;
   revisedBy?: string;
@@ -130,6 +144,7 @@ export interface PeriodSettings {
   hideLabourOffDuty?: boolean;
   hideSecurityOffDuty?: boolean;
   hideAccountantsOffDuty?: boolean;
+  ckiConfig?: CkiConfig;         // CKI open time configuration
 }
 
 export interface DailyProgram {

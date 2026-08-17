@@ -56,6 +56,7 @@ export const FlightManager: React.FC<Props> = ({
     std: "",
     date: startDate || "",
     type: "Turnaround",
+    isFerry: false,
   });
 
   const [inlineEditingId, setInlineEditingId] = useState<string | null>(null);
@@ -345,6 +346,18 @@ export const FlightManager: React.FC<Props> = ({
               />
             </div>
           </div>
+          {/* Ferry Out checkbox */}
+          <label className="flex items-center gap-2.5 cursor-pointer px-1 py-2">
+            <input
+              type="checkbox"
+              className="w-4 h-4 rounded accent-amber-500"
+              checked={!!newFlight.isFerry}
+              onChange={(e) => setNewFlight({ ...newFlight, isFerry: e.target.checked })}
+            />
+            <span className="text-[9px] font-black uppercase text-amber-600 tracking-widest">
+              Ferry Out — no passengers (skip CKI)
+            </span>
+          </label>
           <div className="flex flex-col gap-2 justify-end">
             <button
               type="submit"
@@ -651,6 +664,18 @@ export const FlightManager: React.FC<Props> = ({
                   </div>
                 </div>
               </div>
+              {/* Ferry Out checkbox — inline edit */}
+              <label className="flex items-center gap-2.5 cursor-pointer px-1 py-2 mt-1">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded accent-amber-500"
+                  checked={!!inlineFormData.isFerry}
+                  onChange={(e) => setInlineFormData({ ...inlineFormData, isFerry: e.target.checked })}
+                />
+                <span className="text-[9px] font-black uppercase text-amber-600 tracking-widest">
+                  Ferry Out — no passengers (skip CKI)
+                </span>
+              </label>
               <div className="flex gap-4 pt-4">
                 <button
                   type="button"

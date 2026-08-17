@@ -16,6 +16,8 @@ import {
   calcCgScore,
   isStaffActiveOnDate,
   isStaffActiveInPeriod,
+  CkiConfig,
+  CkiDestOverride,
 } from "../types";
 
 const getStaffRoleRating = (st: Staff | undefined | null, role: string) => {
@@ -51,6 +53,7 @@ import {
   X,
   Edit3,
   Settings,
+  Plus,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase } from "../services/supabaseService";
@@ -119,6 +122,14 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [hideSecurityOffDuty, setHideSecurityOffDuty] = useState(false);
   const [hideAccountantsOffDuty, setHideAccountantsOffDuty] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [activeCkiConfig, setActiveCkiConfig] = useState<CkiConfig>({
+    enabled: false,
+    intlMinutesBefore: 150,
+    domMinutesBefore: 90,
+    domesticCodes: ["CAI", "LXR", "HBE", "SSH", "ASW", "HRG", "MUH"],
+    overrides: [],
+  });
+
   const [userProfile, setUserProfile] = useState<any>(null);
   const [cgRatingsMap, setCgRatingsMap] = useState<Record<string, CgRating>>({});
   const [cgConfig, setCgConfig] = useState<CgConfig>(DEFAULT_CG_CONFIG);
@@ -132,6 +143,15 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [tempHideLabour, setTempHideLabour] = useState(false);
   const [tempHideSecurity, setTempHideSecurity] = useState(false);
   const [tempHideAccountants, setTempHideAccountants] = useState(false);
+
+  // Temporary state for CKI in modal
+  const [tempCkiEnabled, setTempCkiEnabled] = useState(false);
+  const [tempCkiIntlMins, setTempCkiIntlMins] = useState("150");
+  const [tempCkiDomMins, setTempCkiDomMins] = useState("90");
+  const [tempCkiDomCodes, setTempCkiDomCodes] = useState("CAI, LXR, HBE, SSH, ASW, HRG, MUH");
+  const [tempCkiOverrides, setTempCkiOverrides] = useState<CkiDestOverride[]>([]);
+  const [newOverrideCode, setNewOverrideCode] = useState("");
+  const [newOverrideMins, setNewOverrideMins] = useState("180");
 
   useEffect(() => {
     const fetchProfileAndCg = async () => {
@@ -175,6 +195,7 @@ export const ProgramDisplay: React.FC<Props> = ({
     const savedHideLabour = localStorage.getItem("hideLabour_global") === "true";
     const savedHideSecurity = localStorage.getItem("hideSecurity_global") === "true";
     const savedHideAccountants = localStorage.getItem("hideAccountants_global") === "true";
+    const savedCkiRaw = localStorage.getItem("cki_config_global");
 
     const activeRangePrograms = programs.filter(
       (p) => p.dateString && p.dateString >= startDate && p.dateString <= endDate
@@ -185,12 +206,28 @@ export const ProgramDisplay: React.FC<Props> = ({
     let activeRev = "";
     let activeMin = 23;
     let activeMax = 27;
+    let loadedCki: CkiConfig = {
+      enabled: false,
+      intlMinutesBefore: 150,
+      domMinutesBefore: 90,
+      domesticCodes: ["CAI", "LXR", "HBE", "SSH", "ASW", "HRG", "MUH"],
+      overrides: [],
+    };
+
+    if (savedCkiRaw) {
+      try {
+        loadedCki = { ...loadedCki, ...JSON.parse(savedCkiRaw) };
+      } catch (e) {}
+    }
 
     if (dbSettings) {
       activePrep = dbSettings.preparedBy ?? (savedPrep !== null ? savedPrep : "");
       activeRev = dbSettings.revisedBy ?? (savedRev !== null ? savedRev : "");
       activeMin = dbSettings.minOffDayHours !== undefined ? dbSettings.minOffDayHours : (savedMin !== null ? Number(savedMin) : 23);
       activeMax = dbSettings.maxOffDayHours !== undefined ? dbSettings.maxOffDayHours : (savedMax !== null ? Number(savedMax) : 27);
+      if (dbSettings.ckiConfig) {
+        loadedCki = { ...loadedCki, ...dbSettings.ckiConfig };
+      }
     } else {
       if (savedPrep !== null) {
         activePrep = savedPrep;
@@ -214,13 +251,15 @@ export const ProgramDisplay: React.FC<Props> = ({
     setHideLabourOffDuty(savedHideLabour);
     setHideSecurityOffDuty(savedHideSecurity);
     setHideAccountantsOffDuty(savedHideAccountants);
+    setActiveCkiConfig(loadedCki);
   }, [startDate, endDate, programs]);
 
   const handleSaveSettings = async (
     prep: string,
     rev: string,
     minH: number,
-    maxH: number
+    maxH: number,
+    ckiConf?: CkiConfig
   ) => {
     const keyPrefix = `${startDate}_${endDate}`;
     localStorage.setItem(`prep_${keyPrefix}`, prep);
@@ -231,6 +270,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     localStorage.setItem("hideLabour_global", tempHideLabour.toString());
     localStorage.setItem("hideSecurity_global", tempHideSecurity.toString());
     localStorage.setItem("hideAccountants_global", tempHideAccountants.toString());
+    if (ckiConf) {
+      localStorage.setItem("cki_config_global", JSON.stringify(ckiConf));
+      setActiveCkiConfig(ckiConf);
+    }
     
     setPeriodPreparedBy(prep);
     setPeriodRevisedBy(rev);
@@ -250,6 +293,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       hideLabourOffDuty: tempHideLabour,
       hideSecurityOffDuty: tempHideSecurity,
       hideAccountantsOffDuty: tempHideAccountants,
+      ckiConfig: ckiConf || activeCkiConfig,
     };
 
     // Calculate all date strings in [startDate...endDate]
@@ -1822,25 +1866,65 @@ export const ProgramDisplay: React.FC<Props> = ({
                  }
              });
              
-             if (f.eta) {
-                const cell = sheet.getCell(`D${rt.number}`);
-                cell.value = {
-                  richText: [
-                    { text: (f.sta || "NS") + "\n" },
-                    { text: `ETA ${f.eta}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
-                  ]
-                };
-             }
-             
-             if (f.etd) {
-                const cell = sheet.getCell(`E${rt.number}`);
-                cell.value = {
-                  richText: [
-                    { text: (f.std || "---") + "\n" },
-                    { text: `ETD ${f.etd}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
-                  ]
-                };
-             }
+              // CKI Open Time calculation
+              const ckiConf = activeCkiConfig;
+              let ckiText = "";
+              if (ckiConf?.enabled && !f.isFerry && f.std && f.std !== "---" && f.std.includes(":")) {
+                const destCode = (f.to || "").toUpperCase().trim();
+                const domList = (ckiConf.domesticCodes || []).map((c) => c.toUpperCase().trim());
+                const isDomestic = domList.includes(destCode);
+                const override = (ckiConf.overrides || []).find((o) => o.code.toUpperCase().trim() === destCode);
+                const minsBefore = override
+                  ? override.minutesBefore
+                  : isDomestic
+                  ? ckiConf.domMinutesBefore
+                  : ckiConf.intlMinutesBefore;
+
+                const [stdH, stdM] = f.std.split(":").map(Number);
+                if (!isNaN(stdH) && !isNaN(stdM)) {
+                  const totalMins = stdH * 60 + stdM - (minsBefore || 0);
+                  const ckiH = String(Math.floor((((totalMins % 1440) + 1440) % 1440) / 60)).padStart(2, "0");
+                  const ckiM = String((((totalMins % 60) + 60) % 60)).padStart(2, "0");
+                  ckiText = `CKI: ${ckiH}:${ckiM}`;
+                }
+              }
+
+              if (f.eta) {
+                 const cell = sheet.getCell(`D${rt.number}`);
+                 cell.value = {
+                   richText: [
+                     { text: (f.sta || "NS") + "\n" },
+                     { text: `ETA ${f.eta}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
+                   ]
+                 };
+              }
+              
+              if (f.etd && ckiText) {
+                 const cell = sheet.getCell(`E${rt.number}`);
+                 cell.value = {
+                   richText: [
+                     { text: (f.std || "---") + "\n" },
+                     { text: `ETD ${f.etd}\n`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } },
+                     { text: ckiText, font: { color: { argb: 'FFFF0000' }, bold: true, size: 8 } }
+                   ]
+                 };
+              } else if (f.etd) {
+                 const cell = sheet.getCell(`E${rt.number}`);
+                 cell.value = {
+                   richText: [
+                     { text: (f.std || "---") + "\n" },
+                     { text: `ETD ${f.etd}`, font: { color: { argb: 'FFFF0000' }, bold: true, size: 9 } }
+                   ]
+                 };
+              } else if (ckiText) {
+                 const cell = sheet.getCell(`E${rt.number}`);
+                 cell.value = {
+                   richText: [
+                     { text: (f.std || "---") + "\n" },
+                     { text: ckiText, font: { color: { argb: 'FFFF0000' }, bold: true, size: 8 } }
+                   ]
+                 };
+              }
              
              if (fIndex === 0) {
                  const pickupCell = sheet.getCell(`G${rt.number}`);
@@ -3557,6 +3641,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                 setTempMinOff(minOffDayHours.toString()); setTempMaxOff(maxOffDayHours.toString());
                 setTempHideDrivers(hideDriversOffDuty); setTempHideLabour(hideLabourOffDuty);
                 setTempHideSecurity(hideSecurityOffDuty); setTempHideAccountants(hideAccountantsOffDuty);
+                setTempCkiEnabled(activeCkiConfig.enabled);
+                setTempCkiIntlMins(activeCkiConfig.intlMinutesBefore.toString());
+                setTempCkiDomMins(activeCkiConfig.domMinutesBefore.toString());
+                setTempCkiDomCodes((activeCkiConfig.domesticCodes || []).join(", "));
+                setTempCkiOverrides([...(activeCkiConfig.overrides || [])]);
                 setShowSettingsModal(true);
               }}
               className="px-4 py-3 bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-indigo-400 transition-all flex items-center gap-2 active:scale-95"
@@ -5321,6 +5410,135 @@ export const ProgramDisplay: React.FC<Props> = ({
                   Toggle which staff groups/roles are hidden from the Off-Duty / Days Off lists on the Daily tab, PDF exports, and Excel sheets.
                 </p>
               </div>
+
+              {/* CKI Open Time in Staff Excel */}
+              <div className="space-y-4 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-black uppercase tracking-wider text-xs text-slate-700">
+                      CKI Open Time (Staff Excel)
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Show counter opening time in red under STD in Staff Excel
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={tempCkiEnabled}
+                      onChange={(e) => setTempCkiEnabled(e.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+
+                {tempCkiEnabled && (
+                  <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl animate-in fade-in duration-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
+                          International (Min before STD)
+                        </label>
+                        <input
+                          type="number"
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
+                          value={tempCkiIntlMins}
+                          onChange={(e) => setTempCkiIntlMins(e.target.value)}
+                          placeholder="e.g. 150 (2h30m)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
+                          Domestic (Min before STD)
+                        </label>
+                        <input
+                          type="number"
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-400"
+                          value={tempCkiDomMins}
+                          onChange={(e) => setTempCkiDomMins(e.target.value)}
+                          placeholder="e.g. 90 (1h30m)"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">
+                        Domestic Airport Codes (Comma-separated)
+                      </label>
+                      <input
+                        type="text"
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 uppercase outline-none focus:border-indigo-400"
+                        value={tempCkiDomCodes}
+                        onChange={(e) => setTempCkiDomCodes(e.target.value)}
+                        placeholder="CAI, LXR, HBE, SSH, ASW, HRG, MUH"
+                      />
+                      <p className="text-[9px] text-slate-400 mt-1">
+                        Flights with destinations matching these codes will use the Domestic open time. All others use International.
+                      </p>
+                    </div>
+
+                    {/* Per-Destination Overrides */}
+                    <div className="space-y-2 pt-2 border-t border-slate-200">
+                      <label className="block text-[10px] font-black uppercase text-slate-600">
+                        Per-Destination Overrides
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          maxLength={4}
+                          placeholder="DEST (e.g. DXB)"
+                          className="w-1/2 p-2 bg-white border border-slate-200 rounded-xl text-xs font-black uppercase text-slate-800 outline-none"
+                          value={newOverrideCode}
+                          onChange={(e) => setNewOverrideCode(e.target.value.toUpperCase())}
+                        />
+                        <input
+                          type="number"
+                          placeholder="Minutes (e.g. 180)"
+                          className="w-1/2 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none"
+                          value={newOverrideMins}
+                          onChange={(e) => setNewOverrideMins(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!newOverrideCode.trim()) return;
+                            const mins = parseInt(newOverrideMins) || 120;
+                            const filtered = tempCkiOverrides.filter(
+                              (o) => o.code.toUpperCase() !== newOverrideCode.trim().toUpperCase()
+                            );
+                            setTempCkiOverrides([...filtered, { code: newOverrideCode.trim().toUpperCase(), minutesBefore: mins }]);
+                            setNewOverrideCode("");
+                          }}
+                          className="px-3 py-2 bg-slate-950 text-white rounded-xl text-xs font-bold hover:bg-slate-800 flex items-center gap-1 shrink-0"
+                        >
+                          <Plus size={14} /> Add
+                        </button>
+                      </div>
+
+                      {tempCkiOverrides.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {tempCkiOverrides.map((ov) => (
+                            <span
+                              key={ov.code}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-800 shadow-sm"
+                            >
+                              <span>{ov.code}: <span className="text-emerald-600 font-black">{ov.minutesBefore}m</span></span>
+                              <button
+                                type="button"
+                                onClick={() => setTempCkiOverrides(tempCkiOverrides.filter((o) => o.code !== ov.code))}
+                                className="text-slate-400 hover:text-rose-500 transition-colors"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex gap-3 justify-end">
@@ -5334,7 +5552,17 @@ export const ProgramDisplay: React.FC<Props> = ({
                 onClick={() => {
                   const minVal = parseFloat(tempMinOff) || 23;
                   const maxVal = parseFloat(tempMaxOff) || 27;
-                  handleSaveSettings(tempPrep, tempRev, minVal, maxVal);
+                  const ckiConfToSave: CkiConfig = {
+                    enabled: tempCkiEnabled,
+                    intlMinutesBefore: parseInt(tempCkiIntlMins) || 150,
+                    domMinutesBefore: parseInt(tempCkiDomMins) || 90,
+                    domesticCodes: tempCkiDomCodes
+                      .split(",")
+                      .map((c) => c.trim().toUpperCase())
+                      .filter(Boolean),
+                    overrides: tempCkiOverrides,
+                  };
+                  handleSaveSettings(tempPrep, tempRev, minVal, maxVal, ckiConfToSave);
                 }}
                 className="px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase tracking-widest italic transition-colors text-sm shadow-md shadow-indigo-600/10"
               >
