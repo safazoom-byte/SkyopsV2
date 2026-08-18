@@ -1936,7 +1936,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-10 sticky top-[100px] z-40 order-1 lg:order-2 self-start">
+              <div className="bg-white p-6 md:p-10 rounded-2xl md:rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col gap-10 lg:sticky lg:top-[100px] lg:z-30 order-1 lg:order-2 self-start">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-slate-950 rounded-2xl flex items-center justify-center text-blue-500 shadow-xl">
                     <Terminal size={24} />

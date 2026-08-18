@@ -34,6 +34,9 @@ import {
   Target,
   AlertCircle,
   HelpCircle,
+  Lock,
+  Unlock,
+  Zap,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -77,6 +80,14 @@ export const CGRatingModule: React.FC<CGRatingModuleProps> = ({
   const [testYears, setTestYears] = useState<number>(1.5);
   const [testPax, setTestPax] = useState<number>(50);
   const [testErrors, setTestErrors] = useState<number>(1);
+
+  // Weight Slider Locks & Auto-Balance Mode
+  const [lockedWeights, setLockedWeights] = useState<{ exp: boolean; thr: boolean; acc: boolean }>({
+    exp: false,
+    thr: false,
+    acc: false,
+  });
+  const [isAutoBalanceEnabled, setIsAutoBalanceEnabled] = useState<boolean>(true);
 
   // Active editing state for staff rows
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
@@ -220,6 +231,138 @@ export const CGRatingModule: React.FC<CGRatingModuleProps> = ({
     (Number(draftConfig.weight_thr) || 0) +
     (Number(draftConfig.weight_acc) || 0);
   const isWeightValid = totalWeight === 100;
+
+  // Real, Foolproof Weight Adjustment: Guaranteeing Sum is ALWAYS Exactly 100%
+  const handleWeightSliderChange = (
+    changedKey: "weight_exp" | "weight_thr" | "weight_acc",
+    desiredVal: number
+  ) => {
+    const keyMap = {
+      weight_exp: "exp",
+      weight_thr: "thr",
+      weight_acc: "acc",
+    } as const;
+
+    const otherKeys = (["weight_exp", "weight_thr", "weight_acc"] as const).filter(
+      (k) => k !== changedKey
+    );
+
+    // Sum of locked weights among other sliders
+    const lockedOtherSum = otherKeys
+      .filter((k) => lockedWeights[keyMap[k]])
+      .reduce((acc, k) => acc + (draftConfig[k] || 0), 0);
+
+    // Maximum that changed slider can take without violating locked values
+    const maxPossible = Math.max(0, 100 - lockedOtherSum);
+    const targetVal = Math.min(maxPossible, Math.max(0, desiredVal));
+
+    const delta = targetVal - (draftConfig[changedKey] || 0);
+    if (delta === 0) return;
+
+    const unlockedOtherKeys = otherKeys.filter((k) => !lockedWeights[keyMap[k]]);
+
+    if (unlockedOtherKeys.length === 0) {
+      return; // Cannot move if all other sliders are locked
+    }
+
+    if (unlockedOtherKeys.length === 1) {
+      // One unlocked slider absorbs the full remainder
+      const otherKey = unlockedOtherKeys[0];
+      const otherVal = Math.max(0, 100 - targetVal - lockedOtherSum);
+      setDraftConfig({
+        ...draftConfig,
+        [changedKey]: targetVal,
+        [otherKey]: otherVal,
+      });
+      return;
+    }
+
+    // Both other sliders are unlocked: distribute delta proportionally
+    const k1 = unlockedOtherKeys[0];
+    const k2 = unlockedOtherKeys[1];
+    const current1 = draftConfig[k1] || 0;
+    const current2 = draftConfig[k2] || 0;
+    const availableForBoth = 100 - targetVal - lockedOtherSum;
+
+    let next1: number;
+    let next2: number;
+
+    const unlockedSum = current1 + current2;
+    if (unlockedSum === 0) {
+      next1 = Math.floor(availableForBoth / 2);
+      next2 = availableForBoth - next1;
+    } else {
+      const ratio1 = current1 / unlockedSum;
+      next1 = Math.round(availableForBoth * ratio1);
+      next2 = availableForBoth - next1;
+    }
+
+    setDraftConfig({
+      ...draftConfig,
+      [changedKey]: targetVal,
+      [k1]: Math.max(0, next1),
+      [k2]: Math.max(0, next2),
+    });
+  };
+
+  // 1-Click Normalize to exactly 100%
+  const handleNormalizeWeights = () => {
+    const sum =
+      (draftConfig.weight_exp || 0) +
+      (draftConfig.weight_thr || 0) +
+      (draftConfig.weight_acc || 0);
+
+    if (sum === 0) {
+      setDraftConfig({
+        ...draftConfig,
+        weight_exp: 35,
+        weight_thr: 35,
+        weight_acc: 30,
+      });
+      return;
+    }
+
+    const exp = Math.round(((draftConfig.weight_exp || 0) / sum) * 100);
+    const thr = Math.round(((draftConfig.weight_thr || 0) / sum) * 100);
+    const acc = 100 - (exp + thr);
+
+    setDraftConfig({
+      ...draftConfig,
+      weight_exp: Math.max(0, exp),
+      weight_thr: Math.max(0, thr),
+      weight_acc: Math.max(0, acc),
+    });
+  };
+
+  // Preset Application
+  const applyPreset = (exp: number, thr: number, acc: number) => {
+    setLockedWeights({ exp: false, thr: false, acc: false });
+    setDraftConfig({
+      ...draftConfig,
+      weight_exp: exp,
+      weight_thr: thr,
+      weight_acc: acc,
+    });
+  };
+
+  // Toggle Lock for a slider with safety check
+  const toggleWeightLock = (key: "exp" | "thr" | "acc") => {
+    const currentlyLockedCount = Object.values(lockedWeights).filter(Boolean).length;
+    if (!lockedWeights[key] && currentlyLockedCount >= 2) {
+      // Cannot lock all 3 sliders, keep at least 1 dynamic balance slider
+      return;
+    }
+
+    // When locking, ensure the current weights are strictly 100%
+    if (!lockedWeights[key] && totalWeight !== 100) {
+      handleNormalizeWeights();
+    }
+
+    setLockedWeights((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
 
   // Live preview test score
   const liveTestResult = useMemo(() => {
@@ -421,89 +564,240 @@ export const CGRatingModule: React.FC<CGRatingModuleProps> = ({
           {/* Tab A: Weights */}
           {openSection === "weights" && (
             <div className="space-y-6 pt-2">
+              {/* Auto-Balance Toolbar & Presets */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoBalanceEnabled(!isAutoBalanceEnabled)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      isAutoBalanceEnabled
+                        ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/20"
+                        : "bg-white text-slate-600 border border-slate-200"
+                    }`}
+                  >
+                    <Zap size={14} className={isAutoBalanceEnabled ? "text-yellow-300" : "text-slate-400"} />
+                    <span>Live Auto-Balance: {isAutoBalanceEnabled ? "ON" : "OFF"}</span>
+                  </button>
+                  <span className="text-[11px] text-slate-400 hidden sm:inline">
+                    (Lock 🔒 sliders to hold exact values like 40%)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">Presets:</span>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(35, 35, 30)}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 transition-colors"
+                  >
+                    35/35/30 (Default)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(20, 50, 30)}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 transition-colors"
+                  >
+                    20/50/30 (Throughput)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset(25, 25, 50)}
+                    className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 transition-colors"
+                  >
+                    25/25/50 (Accuracy)
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Exp Slider */}
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                <div className={`p-5 rounded-2xl border transition-all space-y-3 ${
+                  lockedWeights.exp ? "bg-amber-50/60 border-amber-300 shadow-sm" : "bg-slate-50 border-slate-200/70"
+                }`}>
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
                       Experience Weight
                     </span>
-                    <span className="text-sm font-black text-indigo-600 font-mono">
-                      {draftConfig.weight_exp}%
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleWeightLock("exp")}
+                        className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 text-[10px] font-black uppercase ${
+                          lockedWeights.exp
+                            ? "bg-amber-500 text-white shadow-sm ring-2 ring-amber-400/40"
+                            : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                        }`}
+                        title={lockedWeights.exp ? "Locked: value will not change when moving other sliders" : "Unlocked"}
+                      >
+                        {lockedWeights.exp ? <Lock size={12} /> : <Unlock size={12} />}
+                        <span>{lockedWeights.exp ? "LOCKED" : "LOCK"}</span>
+                      </button>
+                      <span className="text-base font-black text-indigo-600 font-mono w-12 text-right">
+                        {draftConfig.weight_exp}%
+                      </span>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={draftConfig.weight_exp}
-                    onChange={(e) =>
-                      setDraftConfig({
-                        ...draftConfig,
-                        weight_exp: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={lockedWeights.exp || draftConfig.weight_exp <= 0}
+                      onClick={() => handleWeightSliderChange("weight_exp", (draftConfig.weight_exp || 0) - 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      -5
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      disabled={lockedWeights.exp}
+                      value={draftConfig.weight_exp}
+                      onChange={(e) =>
+                        handleWeightSliderChange("weight_exp", parseInt(e.target.value) || 0)
+                      }
+                      className={`w-full accent-indigo-600 cursor-pointer ${
+                        lockedWeights.exp ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      disabled={lockedWeights.exp || draftConfig.weight_exp >= 100}
+                      onClick={() => handleWeightSliderChange("weight_exp", (draftConfig.weight_exp || 0) + 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      +5
+                    </button>
+                  </div>
                   <p className="text-[11px] text-slate-400">
                     Tenure and station operational familiarity
                   </p>
                 </div>
 
                 {/* Throughput Slider */}
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                <div className={`p-5 rounded-2xl border transition-all space-y-3 ${
+                  lockedWeights.thr ? "bg-amber-50/60 border-amber-300 shadow-sm" : "bg-slate-50 border-slate-200/70"
+                }`}>
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
                       Throughput Weight
                     </span>
-                    <span className="text-sm font-black text-indigo-600 font-mono">
-                      {draftConfig.weight_thr}%
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleWeightLock("thr")}
+                        className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 text-[10px] font-black uppercase ${
+                          lockedWeights.thr
+                            ? "bg-amber-500 text-white shadow-sm ring-2 ring-amber-400/40"
+                            : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                        }`}
+                        title={lockedWeights.thr ? "Locked: value will not change when moving other sliders" : "Unlocked"}
+                      >
+                        {lockedWeights.thr ? <Lock size={12} /> : <Unlock size={12} />}
+                        <span>{lockedWeights.thr ? "LOCKED" : "LOCK"}</span>
+                      </button>
+                      <span className="text-base font-black text-indigo-600 font-mono w-12 text-right">
+                        {draftConfig.weight_thr}%
+                      </span>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={draftConfig.weight_thr}
-                    onChange={(e) =>
-                      setDraftConfig({
-                        ...draftConfig,
-                        weight_thr: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={lockedWeights.thr || draftConfig.weight_thr <= 0}
+                      onClick={() => handleWeightSliderChange("weight_thr", (draftConfig.weight_thr || 0) - 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      -5
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      disabled={lockedWeights.thr}
+                      value={draftConfig.weight_thr}
+                      onChange={(e) =>
+                        handleWeightSliderChange("weight_thr", parseInt(e.target.value) || 0)
+                      }
+                      className={`w-full accent-indigo-600 cursor-pointer ${
+                        lockedWeights.thr ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      disabled={lockedWeights.thr || draftConfig.weight_thr >= 100}
+                      onClick={() => handleWeightSliderChange("weight_thr", (draftConfig.weight_thr || 0) + 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      +5
+                    </button>
+                  </div>
                   <p className="text-[11px] text-slate-400">
                     Pax checked-in and processed per flight
                   </p>
                 </div>
 
                 {/* Accuracy Slider */}
-                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                <div className={`p-5 rounded-2xl border transition-all space-y-3 ${
+                  lockedWeights.acc ? "bg-amber-50/60 border-amber-300 shadow-sm" : "bg-slate-50 border-slate-200/70"
+                }`}>
                   <div className="flex justify-between items-center">
                     <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
                       Accuracy Weight
                     </span>
-                    <span className="text-sm font-black text-indigo-600 font-mono">
-                      {draftConfig.weight_acc}%
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleWeightLock("acc")}
+                        className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 text-[10px] font-black uppercase ${
+                          lockedWeights.acc
+                            ? "bg-amber-500 text-white shadow-sm ring-2 ring-amber-400/40"
+                            : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                        }`}
+                        title={lockedWeights.acc ? "Locked: value will not change when moving other sliders" : "Unlocked"}
+                      >
+                        {lockedWeights.acc ? <Lock size={12} /> : <Unlock size={12} />}
+                        <span>{lockedWeights.acc ? "LOCKED" : "LOCK"}</span>
+                      </button>
+                      <span className="text-base font-black text-indigo-600 font-mono w-12 text-right">
+                        {draftConfig.weight_acc}%
+                      </span>
+                    </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="5"
-                    value={draftConfig.weight_acc}
-                    onChange={(e) =>
-                      setDraftConfig({
-                        ...draftConfig,
-                        weight_acc: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className="w-full accent-indigo-600 cursor-pointer"
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={lockedWeights.acc || draftConfig.weight_acc <= 0}
+                      onClick={() => handleWeightSliderChange("weight_acc", (draftConfig.weight_acc || 0) - 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      -5
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      disabled={lockedWeights.acc}
+                      value={draftConfig.weight_acc}
+                      onChange={(e) =>
+                        handleWeightSliderChange("weight_acc", parseInt(e.target.value) || 0)
+                      }
+                      className={`w-full accent-indigo-600 cursor-pointer ${
+                        lockedWeights.acc ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      disabled={lockedWeights.acc || draftConfig.weight_acc >= 100}
+                      onClick={() => handleWeightSliderChange("weight_acc", (draftConfig.weight_acc || 0) + 5)}
+                      className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-black flex items-center justify-center text-slate-700"
+                    >
+                      +5
+                    </button>
+                  </div>
                   <p className="text-[11px] text-slate-400">
                     Error rate (DCS infractions, bag mismatches per 150 pax)
                   </p>
@@ -522,9 +816,9 @@ export const CGRatingModule: React.FC<CGRatingModuleProps> = ({
                 >
                   <div className="flex items-center gap-3">
                     {isWeightValid ? (
-                      <CheckCircle2 size={20} className="text-emerald-600" />
+                      <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
                     ) : (
-                      <AlertTriangle size={20} className="text-rose-600" />
+                      <AlertTriangle size={20} className="text-rose-600 shrink-0" />
                     )}
                     <div>
                       <div className="text-xs font-black uppercase tracking-wider">
@@ -537,6 +831,16 @@ export const CGRatingModule: React.FC<CGRatingModuleProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {!isWeightValid && (
+                    <button
+                      type="button"
+                      onClick={handleNormalizeWeights}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold tracking-wide transition-colors shadow-sm shrink-0 flex items-center gap-1.5"
+                    >
+                      <Zap size={14} /> Auto-Balance (100%)
+                    </button>
+                  )}
                 </div>
 
                 {/* Live Preview Tester */}
