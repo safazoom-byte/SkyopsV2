@@ -876,6 +876,7 @@ const App: React.FC = () => {
     }
 
     setIncomingSelectedStaffIds([]);
+    setIncomingSearchTerm("");
     setNotification(`${newDuties.length} Rest Log Entries Added`);
   };
 
@@ -1026,15 +1027,41 @@ const App: React.FC = () => {
       return;
     }
 
-    // Build leave requests: one LeaveRequest per staff per selected date
+    // Group consecutive dates into date ranges
+    const groupConsecutiveDates = (dates: string[]) => {
+      if (dates.length === 0) return [];
+      const sorted = Array.from(new Set(dates)).sort();
+      const ranges: { startDate: string; endDate: string }[] = [];
+      let rStart = sorted[0];
+      let rEnd = sorted[0];
+      for (let i = 1; i < sorted.length; i++) {
+        const curr = sorted[i];
+        const prevDate = new Date(`${rEnd}T00:00:00Z`);
+        const currDate = new Date(`${curr}T00:00:00Z`);
+        const diffDays = Math.round((currDate.getTime() - prevDate.getTime()) / (24 * 60 * 60 * 1000));
+        if (diffDays === 1) {
+          rEnd = curr;
+        } else {
+          ranges.push({ startDate: rStart, endDate: rEnd });
+          rStart = curr;
+          rEnd = curr;
+        }
+      }
+      ranges.push({ startDate: rStart, endDate: rEnd });
+      return ranges;
+    };
+
+    const groupedRanges = groupConsecutiveDates(datesToApply);
+
+    // Build leave requests: one consolidated LeaveRequest per staff per contiguous date range
     const newLeaves: LeaveRequest[] = [];
     for (const sid of finalIds) {
-      for (const dateStr of datesToApply) {
+      for (const range of groupedRanges) {
         newLeaves.push({
           id: crypto.randomUUID(),
           staffId: sid,
-          startDate: dateStr,
-          endDate: dateStr,
+          startDate: range.startDate,
+          endDate: range.endDate,
           type: quickLeaveType,
         });
       }
@@ -1051,7 +1078,13 @@ const App: React.FC = () => {
       );
     }
 
+    // Wipe all input boxes after inserting
+    setQuickLeaveStaffIds([]);
+    setQuickLeaveSearchTerm("");
     setQuickLeaveSelectedDates([]);
+    setQuickLeaveCustomDate("");
+    setQuickLeaveRangeFrom("");
+    setQuickLeaveRangeTo("");
     setNotification(`Added ${newLeaves.length} ${quickLeaveType} entries successfully`);
   };
 
@@ -1879,7 +1912,7 @@ const App: React.FC = () => {
                             className="w-full h-[56px] bg-indigo-600 text-white rounded-2xl font-black uppercase italic tracking-widest hover:bg-indigo-500 disabled:opacity-50 transition-all flex items-center justify-center gap-2 shadow-lg disabled:shadow-none"
                           >
                             <Plus size={16} />
-                            Add {quickLeaveSelectedDates.length || 0} {quickLeaveType} Record{quickLeaveSelectedDates.length > 1 ? "s" : ""}
+                            Add {quickLeaveType} ({quickLeaveSelectedDates.length || 0} Day{quickLeaveSelectedDates.length > 1 ? "s" : ""})
                           </button>
 
                           {/* 5. Feedback List */}

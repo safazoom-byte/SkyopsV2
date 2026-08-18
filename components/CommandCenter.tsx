@@ -15,11 +15,13 @@ import {
   Star,
   Download, ChevronDown, ChevronRight,
   Award,
+  CalendarDays,
 } from "lucide-react";
 import { UserProfile, AuditLog, Flight, ShiftConfig, Staff } from "../types";
 import { db, auth, supabase } from "../services/supabaseService";
 import { AirlineManager } from "./AirlineManager";
 import { CGRatingModule } from "./CGRatingModule";
+import { LeaveRestPolicyManager } from "./LeaveRestPolicyManager";
 
 const NumberInput = ({ label, value, onChange, onBlur, disabled }: any) => {
   const [val, setVal] = useState(value?.toString() || "0");
@@ -93,7 +95,7 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
   onUpdateStaff,
   onReloadStaff,
 }) => {
-  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines" | "ratings">(() => currentUser.role === "super_admin" ? "audit" : "users");
+  const [activeTab, setActiveTab] = useState<"audit" | "users" | "system" | "airports" | "airlines" | "ratings" | "leave_rest">(() => currentUser.role === "super_admin" ? "audit" : "users");
   const [newAirportName, setNewAirportName] = useState("");
   const [newAirportCode, setNewAirportCode] = useState("");
 
@@ -491,6 +493,12 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "ratings" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
           >
             <Star size={14} className="inline mr-1 md:mr-2" /> Rating System
+          </button>
+          <button
+            onClick={() => setActiveTab("leave_rest")}
+            className={`whitespace-nowrap px-4 md:px-6 py-2.5 md:py-3 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${activeTab === "leave_rest" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-white"}`}
+          >
+            <CalendarDays size={14} className="inline mr-1 md:mr-2" /> Leave & Rest
           </button>
           {currentUser.role === "super_admin" && (
           <button
@@ -1083,6 +1091,8 @@ export const CommandCenter: React.FC<CommandCenterProps> = ({
             </div>
           )}
         </div>
+      ) : activeTab === "leave_rest" ? (
+        <LeaveRestPolicyManager staff={staff} />
       ) : (
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow">

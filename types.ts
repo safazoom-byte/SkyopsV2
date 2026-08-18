@@ -135,6 +135,34 @@ export interface CkiConfig {
   overrides: CkiDestOverride[];  // per-destination overrides (take priority)
 }
 
+export interface LeavePolicyRule {
+  leaveDays: number;         // 0 to 7 days in 7-day program
+  workShifts: number;        // Deserved work shifts
+  offDays: number;           // Deserved off days
+  absenceDeduction: number;  // Shifts deducted from nominal capacity
+}
+
+export interface LeavePolicyConfig {
+  name: string;
+  cycleDays: number;
+  rules: LeavePolicyRule[];
+}
+
+export const DEFAULT_LEAVE_POLICY: LeavePolicyConfig = {
+  name: "Standard 7-Day Aviation Leave & Rest Policy",
+  cycleDays: 7,
+  rules: [
+    { leaveDays: 0, workShifts: 5, offDays: 2, absenceDeduction: 0 },
+    { leaveDays: 1, workShifts: 4, offDays: 2, absenceDeduction: 1 },
+    { leaveDays: 2, workShifts: 3, offDays: 2, absenceDeduction: 2 },
+    { leaveDays: 3, workShifts: 3, offDays: 1, absenceDeduction: 2 },
+    { leaveDays: 4, workShifts: 2, offDays: 1, absenceDeduction: 3 },
+    { leaveDays: 5, workShifts: 0, offDays: 2, absenceDeduction: 5 },
+    { leaveDays: 6, workShifts: 1, offDays: 0, absenceDeduction: 4 },
+    { leaveDays: 7, workShifts: 0, offDays: 0, absenceDeduction: 5 },
+  ],
+};
+
 export interface PeriodSettings {
   preparedBy?: string;
   revisedBy?: string;
@@ -145,6 +173,7 @@ export interface PeriodSettings {
   hideSecurityOffDuty?: boolean;
   hideAccountantsOffDuty?: boolean;
   ckiConfig?: CkiConfig;         // CKI open time configuration
+  leavePolicy?: LeavePolicyConfig; // Customizable leave & rest policy
 }
 
 export interface DailyProgram {

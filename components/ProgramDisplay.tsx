@@ -18,7 +18,13 @@ import {
   isStaffActiveInPeriod,
   CkiConfig,
   CkiDestOverride,
+  LeavePolicyConfig,
 } from "../types";
+import {
+  getStoredLeavePolicy,
+  calculateStaffLeaveAllowance,
+  LEAVE_POLICY_UPDATED_EVENT,
+} from "../services/leavePolicyService";
 
 const getStaffRoleRating = (st: Staff | undefined | null, role: string) => {
   if (!st) return 100;
@@ -133,6 +139,17 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [userProfile, setUserProfile] = useState<any>(null);
   const [cgRatingsMap, setCgRatingsMap] = useState<Record<string, CgRating>>({});
   const [cgConfig, setCgConfig] = useState<CgConfig>(DEFAULT_CG_CONFIG);
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicyConfig>(getStoredLeavePolicy);
+
+  useEffect(() => {
+    const handlePolicyUpdate = () => {
+      setLeavePolicy(getStoredLeavePolicy());
+    };
+    window.addEventListener(LEAVE_POLICY_UPDATED_EVENT, handlePolicyUpdate);
+    return () => {
+      window.removeEventListener(LEAVE_POLICY_UPDATED_EVENT, handlePolicyUpdate);
+    };
+  }, []);
 
   // Temporary state for the modal form inputs
   const [tempPrep, setTempPrep] = useState("");
@@ -2896,7 +2913,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   };
 
   const staffStats = React.useMemo(() => {
-    const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number }> = {};
+    const stats: Record<string, { daysWorked: number; excusedLeaves: number; target: number; targetOff: number }> = {};
     
     // Process leave requests into a faster lookup
     const leaveMap: Record<string, any[]> = {};
@@ -2916,7 +2933,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       
       activePrograms.forEach(p => {
         const pDate = p.dateString || "";
-        const worked = progAssignments[pDate].includes(s.id);
+        const worked = (progAssignments[pDate] || []).includes(s.id);
         if (worked) daysWorked++;
         
         const leaves = leaveMap[s.id] || [];
@@ -2929,6 +2946,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
       
       let target = 5;
+      let targetOff = 2;
       if (s.type === "Roster") {
         const progStart = new Date(`${startDate}T12:00:00Z`);
         const progEnd = new Date(`${endDate}T12:00:00Z`);
@@ -2936,18 +2954,24 @@ export const ProgramDisplay: React.FC<Props> = ({
         const workTo = s.workToDate ? new Date(`${s.workToDate}T12:00:00Z`) : progEnd;
         const overlapStart = workFrom > progStart ? workFrom : progStart;
         const overlapEnd = workTo < progEnd ? workTo : progEnd;
+        let potentialDays = 0;
         if (overlapStart <= overlapEnd) {
-          target = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        } else {
-          target = 0;
+          potentialDays = Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         }
+        const allowance = calculateStaffLeaveAllowance(excusedLeaves, leavePolicy, "Roster", potentialDays);
+        target = allowance.workShifts;
+        targetOff = allowance.offDays;
+      } else {
+        // Local Staff - use Leave & Rest customized matrix policy
+        const allowance = calculateStaffLeaveAllowance(excusedLeaves, leavePolicy, "Local", 5);
+        target = allowance.workShifts;
+        targetOff = allowance.offDays;
       }
-      target -= excusedLeaves;
       
-      stats[s.id] = { daysWorked, excusedLeaves, target };
+      stats[s.id] = { daysWorked, excusedLeaves, target, targetOff };
     });
     return stats;
-  }, [activePrograms, staff, leaveRequests, startDate, endDate]);
+  }, [activePrograms, staff, leaveRequests, startDate, endDate, leavePolicy]);
 
   const getStaffWorkload = (staffId: string) => {
     return staffStats[staffId]?.daysWorked || 0;

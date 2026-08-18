@@ -1,5 +1,10 @@
-import React, { useMemo } from "react";
-import { Staff, ShiftConfig, LeaveRequest, isStaffActiveForDateRange } from "../types";
+import React, { useMemo, useState, useEffect } from "react";
+import { Staff, ShiftConfig, LeaveRequest, isStaffActiveForDateRange, LeavePolicyConfig } from "../types";
+import {
+  getStoredLeavePolicy,
+  calculateStaffLeaveAllowance,
+  LEAVE_POLICY_UPDATED_EVENT,
+} from "../services/leavePolicyService";
 import {
   Users,
   TrendingUp,
@@ -11,6 +16,7 @@ import {
   Activity,
   Scale,
   CalendarX,
+  Sparkles,
 } from "lucide-react";
 
 interface Props {
@@ -37,6 +43,18 @@ export const CapacityForecast: React.FC<Props> = ({
   startDate,
   duration,
 }) => {
+  const [leavePolicy, setLeavePolicy] = useState<LeavePolicyConfig>(getStoredLeavePolicy);
+
+  useEffect(() => {
+    const handlePolicyUpdate = () => {
+      setLeavePolicy(getStoredLeavePolicy());
+    };
+    window.addEventListener(LEAVE_POLICY_UPDATED_EVENT, handlePolicyUpdate);
+    return () => {
+      window.removeEventListener(LEAVE_POLICY_UPDATED_EVENT, handlePolicyUpdate);
+    };
+  }, []);
+
   const stats = useMemo(() => {
     if (!startDate || duration <= 0) return null;
 
@@ -53,10 +71,9 @@ export const CapacityForecast: React.FC<Props> = ({
     const localStaff = activeStaff.filter((s) => s.type === "Local");
     const rosterStaff = activeStaff.filter((s) => s.type === "Roster");
 
-    // --- LOCAL CAPACITY CALCULATION (WITH LEAVE DISRUPTION) ---
-    // Rule: Standard is 5 days work per 7 days (5/7 ratio).
-    // Logic aligned with GeminiService: Math.floor(duration * (5/7))
-    // Example: 7 days = 5 shifts. 30 days = 21 shifts.
+    // --- LOCAL CAPACITY CALCULATION (WITH LEAVE POLICY INTEGRATION) ---
+    // Standard contract is 5 work shifts per 7-day cycle.
+    // When leave occurs, we query the Leave & Rest policy matrix (e.g. 6d leave => 1 work shift, 7d leave => 5d loss max).
     let localCapacity = 0;
     let totalLeaveLost = 0;
 
@@ -84,12 +101,20 @@ export const CapacityForecast: React.FC<Props> = ({
         leaveDays += getOverlapDays(activeStart, activeEnd, lStart, lEnd);
       });
 
-      const activeDays = Math.max(0, contractDays - leaveDays);
-      let netCap = Math.round(activeDays * (5 / 7));
-      if (contractDays < 7 && contractDays > 0) netCap = Math.ceil(activeDays * 0.8);
-
-      totalLeaveLost += leaveDays;
-      localCapacity += netCap;
+      if (contractDays >= 7) {
+        // Full 7-day cycle calculation using customized Leave & Rest Policy
+        const allowance = calculateStaffLeaveAllowance(leaveDays, leavePolicy, "Local", 5);
+        localCapacity += allowance.workShifts;
+        totalLeaveLost += allowance.absenceDeduction;
+      } else if (contractDays > 0) {
+        // Partial week (under 7 days)
+        const base = Math.min(contractDays, 5);
+        const cappedLeave = Math.min(contractDays, leaveDays);
+        const deduction = Math.min(base, cappedLeave);
+        const netCap = Math.max(0, base - deduction);
+        localCapacity += netCap;
+        totalLeaveLost += deduction;
+      }
     });
 
     // --- ROSTER CAPACITY CALCULATION ---
@@ -127,8 +152,9 @@ export const CapacityForecast: React.FC<Props> = ({
         leaveDays += getOverlapDays(activeStart, activeEnd, lStart, lEnd);
       });
 
-      rosterCapacity += Math.max(0, days - leaveDays);
-      totalLeaveLost += leaveDays;
+      const allowance = calculateStaffLeaveAllowance(leaveDays, leavePolicy, "Roster", days);
+      rosterCapacity += allowance.workShifts;
+      totalLeaveLost += allowance.absenceDeduction;
     });
 
     const totalSupply = localCapacity + rosterCapacity;
@@ -166,7 +192,7 @@ export const CapacityForecast: React.FC<Props> = ({
       shiftCount,
       coveragePercent,
     };
-  }, [staff, shifts, leaveRequests, startDate, duration]);
+  }, [staff, shifts, leaveRequests, startDate, duration, leavePolicy]);
 
   if (!stats) return null;
 
