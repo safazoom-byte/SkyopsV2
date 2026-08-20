@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
 import "./style.css";
@@ -320,61 +320,58 @@ const App: React.FC = () => {
     }
   }, [notification]);
 
+  const syncCloudData = useCallback(async (airportIdOverride?: string) => {
+    if (!supabase) {
+      setCloudStatus("unconfigured");
+      return;
+    }
+    try {
+      const cloudData = await db.fetchAll(airportIdOverride);
+      const airportsData = await db.getAirports();
+      if (airportsData) setAirports(airportsData);
+      if (cloudData) {
+        setFlights(cloudData.flights || []);
+        setStaff(cloudData.staff || []);
+        setShifts(cloudData.shifts || []);
+        if (cloudData.programs) {
+          const deduped: DailyProgram[] = [];
+          const seen = new Set<string>();
+          const sortedProgs = [...cloudData.programs].sort((a, b) => {
+            const lenA = a.assignments?.length || 0;
+            const lenB = b.assignments?.length || 0;
+            return lenB - lenA;
+          });
+          sortedProgs.forEach((p) => {
+            if (p.dateString) {
+              if (!seen.has(p.dateString)) {
+                seen.add(p.dateString);
+                deduped.push(p);
+              }
+            }
+          });
+          setPrograms(deduped.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || "")));
+        } else {
+          setPrograms([]);
+        }
+        setLeaveRequests(cloudData.leaveRequests || []);
+        setIncomingDuties(cloudData.incomingDuties || []);
+        setCloudStatus("connected");
+      } else {
+        setCloudStatus("error");
+        setCloudError("Authentication session missing or sync failed");
+      }
+    } catch (e: any) {
+      setCloudStatus("error");
+      if (e.message && e.message.includes("Failed to fetch")) {
+        setCloudError("Network Error: Adblocker/VPN blocking connection");
+      } else {
+        setCloudError(e.message || "Unknown error");
+      }
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
-    const syncCloudData = async () => {
-      if (!supabase) {
-        setCloudStatus("unconfigured");
-        return;
-      }
-      try {
-        const cloudData = await db.fetchAll();
-        const airportsData = await db.getAirports();
-        if (mounted) {
-          if (airportsData) setAirports(airportsData);
-          if (cloudData) {
-            if (cloudData.flights?.length) setFlights(cloudData.flights);
-            if (cloudData.staff?.length) setStaff(cloudData.staff);
-            if (cloudData.shifts?.length) setShifts(cloudData.shifts);
-            if (cloudData.programs?.length) {
-              const deduped: DailyProgram[] = [];
-              const seen = new Set<string>();
-              const sortedProgs = [...cloudData.programs].sort((a, b) => {
-                const lenA = a.assignments?.length || 0;
-                const lenB = b.assignments?.length || 0;
-                return lenB - lenA;
-              });
-              sortedProgs.forEach((p) => {
-                if (p.dateString) {
-                  if (!seen.has(p.dateString)) {
-                    seen.add(p.dateString);
-                    deduped.push(p);
-                  }
-                }
-              });
-              setPrograms(deduped.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || "")));
-            }
-            if (cloudData.leaveRequests?.length)
-              setLeaveRequests(cloudData.leaveRequests);
-            if (cloudData.incomingDuties?.length)
-              setIncomingDuties(cloudData.incomingDuties);
-            setCloudStatus("connected");
-          } else {
-            setCloudStatus("error");
-            setCloudError("Authentication session missing or sync failed");
-          }
-        }
-      } catch (e: any) {
-        if (mounted) {
-          setCloudStatus("error");
-          if (e.message && e.message.includes("Failed to fetch")) {
-            setCloudError("Network Error: Adblocker/VPN blocking connection");
-          } else {
-            setCloudError(e.message || "Unknown error");
-          }
-        }
-      }
-    };
     const checkAuth = async () => {
       if (!supabase) {
         setIsInitializing(false);
@@ -446,7 +443,7 @@ const App: React.FC = () => {
       unsubscribe();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [syncCloudData]);
 
 
   useEffect(() => {
@@ -1219,10 +1216,11 @@ const App: React.FC = () => {
               value={userProfile.airport_id || ""}
               onChange={async (e) => {
                 const newId = e.target.value;
+                db.clearProfileCache();
                 const newProfile = { ...userProfile, airport_id: newId };
-                await db.updateUserProfile(newProfile);
                 setUserProfile(newProfile);
-                
+                await db.updateUserProfile(newProfile);
+                await syncCloudData(newId);
               }}
               className="ml-4 p-2.5 bg-slate-800 text-white rounded-xl text-xs font-bold outline-none border border-slate-700"
             >

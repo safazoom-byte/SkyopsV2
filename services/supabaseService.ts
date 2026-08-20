@@ -201,7 +201,7 @@ export const db = {
     }
   },
 
-  async fetchAll() {
+  async fetchAll(airportIdOverride?: string) {
     const client = supabase;
     if (!client) throw new Error("Supabase client not initialized");
     try {
@@ -209,10 +209,11 @@ export const db = {
       if (!session) return null;
       
       const profile = await this.getUserProfile();
+      const currentAirportId = airportIdOverride !== undefined ? airportIdOverride : profile?.airport_id;
       
       // If super_admin has no airport selected, allow global visibility by fetching all
-      let matchCol = profile?.airport_id ? "airport_id" : "user_id";
-      let matchVal = profile?.airport_id ? profile.airport_id : session.user.id;
+      let matchCol = currentAirportId ? "airport_id" : "user_id";
+      let matchVal = currentAirportId ? currentAirportId : session.user.id;
       
       let fQuery = client.from("flights").select("*");
       let sQuery = client.from("staff").select("*");
@@ -221,7 +222,7 @@ export const db = {
       let lQuery = client.from("leave_requests").select("*");
       let iQuery = client.from("incoming_duties").select("*");
 
-      if (profile?.role === "super_admin" && !profile?.airport_id) {
+      if (profile?.role === "super_admin" && !currentAirportId) {
         // Global view: do not apply .eq filter
       } else {
         fQuery = fQuery.eq(matchCol, matchVal);
