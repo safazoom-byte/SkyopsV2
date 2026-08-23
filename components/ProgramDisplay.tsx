@@ -4128,7 +4128,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                         </div>
                       </div>
 
-                      <div className="overflow-x-auto w-full">
+                      {/* Side-by-side layout: shifts (left 65%) | absence registry (right 35%) */}
+                      <div className="flex flex-col md:flex-row">
+                      <div className="overflow-x-auto md:overflow-y-auto w-full md:w-[65%] md:max-h-[72vh] md:border-r border-slate-200">
                         <table className="w-full min-w-[850px] text-left border-collapse">
                           <thead>
                             <tr className="bg-slate-950 text-white text-[10px] font-black uppercase tracking-wider">
@@ -4684,7 +4686,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       </div>
 
                       <div
-                        className={`border-t-4 border-slate-100 transition-colors ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                        className={`border-t-4 md:border-t-0 md:border-l-0 border-slate-100 md:w-[35%] md:max-h-[72vh] md:overflow-y-auto md:flex-shrink-0 transition-colors ${staffActionModal?.date === prog.dateString ? "cursor-pointer hover:bg-slate-50" : ""}`}
                         onDragOver={handleDragOver}
                         onDrop={(e) =>
                           handleDrop(e, "ABSENCE", prog.dateString!)
@@ -4865,6 +4867,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                           </tbody>
                         </table>
                       </div>
+                      </div>{/* end flex-row side-by-side */}
                     </div>
                   );
                 })}
