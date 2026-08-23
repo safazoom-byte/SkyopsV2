@@ -2319,6 +2319,7 @@ const App: React.FC = () => {
                 return;
               }
               const oldShifts = [...shifts];
+              const oldShift = shifts.find((sh) => sh.id === s.id);
               const oldPrograms = [...programsRef.current];
 
               setShifts((p) => p.map((o) => (o.id === s.id ? s : o)));
@@ -2336,6 +2337,24 @@ const App: React.FC = () => {
 
               try {
                 await db.upsertShift(s);
+                if (
+                  oldShift &&
+                  (oldShift.pickupTime !== s.pickupTime || oldShift.endTime !== s.endTime)
+                ) {
+                  db.logRosterUpdate(
+                    {
+                      change_type: "SHIFT_TIME_CHANGE",
+                      affected_date: s.pickupDate,
+                      from_shift_id: s.id,
+                      to_shift_id: s.id,
+                      from_shift_name: `Shift at ${oldShift.pickupTime}`,
+                      to_shift_name: `Shift at ${s.pickupTime}`,
+                      from_value: `${oldShift.pickupTime}–${oldShift.endTime}`,
+                      to_value: `${s.pickupTime}–${s.endTime}`,
+                    },
+                    userProfile
+                  );
+                }
                 await db.logAction(
                   "UPDATE",
                   "SHIFT",
@@ -2510,6 +2529,7 @@ const App: React.FC = () => {
             stationHealth={stationHealth}
             alerts={alerts}
             minRestHours={minRestHours}
+            currentUser={userProfile}
             getLatestPrograms={() => programsRef.current}
             getLatestLeaveRequests={() => leaveRequestsRef.current}
             onUpdatePrograms={async (updated, changedDateStrings?: string[]) => {

@@ -13,6 +13,8 @@ import {
   CgConfig,
   CgRating,
   DEFAULT_CG_CONFIG,
+  RosterUpdate,
+  UpdateLogEntry,
 } from "../types";
 
 const SUPABASE_URL =
@@ -1388,6 +1390,149 @@ export const db = {
     ).length;
   },
 
+  async logRosterUpdate(
+    entry: UpdateLogEntry,
+    currentUser?: { id?: string; name?: string; email?: string } | null
+  ): Promise<void> {
+    if (!supabase) return;
+    try {
+      const session = await auth.getSession();
+      const profile = await this.getUserProfile();
+      const userId = currentUser?.id || session?.user?.id || profile?.id || null;
+      const userName =
+        currentUser?.name ||
+        currentUser?.email ||
+        profile?.email ||
+        session?.user?.email ||
+        "System";
+      const airportId = entry.airport_id || profile?.airport_id || null;
+
+      const affectedDate =
+        entry.affected_date || new Date().toISOString().split("T")[0];
+      const weekStart = entry.week_start || getMonday(affectedDate);
+
+      await supabase.from("roster_updates").insert({
+        change_type: entry.change_type,
+        staff_id: entry.staff_id || null,
+        staff_name: entry.staff_name || null,
+        staff_initials: entry.staff_initials || null,
+        from_value: entry.from_value || null,
+        to_value: entry.to_value || null,
+        affected_date: affectedDate,
+        from_shift_id: entry.from_shift_id || null,
+        to_shift_id: entry.to_shift_id || null,
+        from_shift_name: entry.from_shift_name || null,
+        to_shift_name: entry.to_shift_name || null,
+        changed_by_id: userId,
+        changed_by_name: userName,
+        changed_at: new Date().toISOString(),
+        week_start: weekStart,
+        airport_id: airportId,
+      });
+    } catch (err) {
+      console.warn("Could not insert roster update to DB:", err);
+    }
+  },
+
+  async fetchRosterUpdates(params?: {
+    weekStart?: string;
+    staffId?: string;
+    changeType?: string;
+    airportId?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ data: RosterUpdate[]; count: number }> {
+    if (!supabase) return { data: [], count: 0 };
+    try {
+      const profile = await this.getUserProfile();
+      const currentAirportId = params?.airportId || profile?.airport_id;
+
+      let query = supabase
+        .from("roster_updates")
+        .select("*", { count: "exact" })
+        .order("changed_at", { ascending: false });
+
+      if (profile?.role !== "super_admin" && currentAirportId) {
+        query = query.eq("airport_id", currentAirportId);
+      } else if (params?.airportId) {
+        query = query.eq("airport_id", params.airportId);
+      }
+
+      if (params?.weekStart && params.weekStart !== "ALL") {
+        query = query.eq("week_start", params.weekStart);
+      }
+
+      if (params?.staffId && params.staffId !== "ALL") {
+        query = query.eq("staff_id", params.staffId);
+      }
+
+      if (params?.changeType && params.changeType !== "ALL") {
+        query = query.eq("change_type", params.changeType);
+      }
+
+      const limit = params?.limit || 50;
+      const offset = params?.offset || 0;
+      query = query.range(offset, offset + limit - 1);
+
+      const { data, count, error } = await query;
+      if (error) {
+        console.warn("Could not fetch roster updates:", error.message);
+        return { data: [], count: 0 };
+      }
+
+      return {
+        data: (data || []).map((d: any) => ({
+          id: d.id,
+          change_type: d.change_type,
+          staff_id: d.staff_id,
+          staff_name: d.staff_name,
+          staff_initials: d.staff_initials,
+          from_value: d.from_value,
+          to_value: d.to_value,
+          affected_date: d.affected_date,
+          from_shift_id: d.from_shift_id,
+          to_shift_id: d.to_shift_id,
+          from_shift_name: d.from_shift_name,
+          to_shift_name: d.to_shift_name,
+          changed_by_id: d.changed_by_id,
+          changed_by_name: d.changed_by_name,
+          changed_at: d.changed_at,
+          week_start: d.week_start,
+          airport_id: d.airport_id,
+        })),
+        count: count || 0,
+      };
+    } catch (err) {
+      console.warn("Error in fetchRosterUpdates:", err);
+      return { data: [], count: 0 };
+    }
+  },
+
+  subscribeRosterUpdates(onInsert: (update: RosterUpdate) => void) {
+    if (!supabase) return () => {};
+    const channel = supabase
+      .channel("roster_updates_channel")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "roster_updates",
+        },
+        (payload) => {
+          if (payload.new) {
+            onInsert(payload.new as RosterUpdate);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase?.removeChannel(channel);
+    };
+  },
+
+
   async getCgConfig(): Promise<CgConfig> {
     if (!supabase) {
       try {
@@ -1627,3 +1772,23 @@ export const db = {
     }
   }
 };
+
+export function getMonday(dateStr: string): string {
+  try {
+    const d = new Date(dateStr.includes("T") ? dateStr : `${dateStr}T12:00:00Z`);
+    const day = d.getUTCDay();
+    const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+    d.setUTCDate(diff);
+    return d.toISOString().split("T")[0];
+  } catch {
+    return dateStr;
+  }
+}
+
+export async function logRosterUpdate(
+  entry: UpdateLogEntry,
+  currentUser?: { id?: string; name?: string; email?: string } | null
+): Promise<void> {
+  return db.logRosterUpdate(entry, currentUser);
+}
+

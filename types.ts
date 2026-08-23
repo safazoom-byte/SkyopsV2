@@ -509,3 +509,47 @@ export function getCgLevel(score: number): {
     barColor: "bg-rose-500",
   };
 }
+
+export type RosterChangeType =
+  | "SHIFT_CHANGE"
+  | "DAY_OFF_TO_WORK"
+  | "WORK_TO_DAY_OFF"
+  | "STAFF_ADDED"
+  | "STAFF_REMOVED"
+  | "SHIFT_TIME_CHANGE";
+
+export interface RosterUpdate {
+  id: string;
+  change_type: RosterChangeType | string;
+  staff_id?: string | null;
+  staff_name?: string | null;
+  staff_initials?: string | null;
+  from_value?: string | null;
+  to_value?: string | null;
+  affected_date?: string | null;
+  from_shift_id?: string | null;
+  to_shift_id?: string | null;
+  from_shift_name?: string | null;
+  to_shift_name?: string | null;
+  changed_by_id?: string | null;
+  changed_by_name?: string | null;
+  changed_at?: string;
+  week_start?: string | null;
+  airport_id?: string | null;
+}
+
+export interface UpdateLogEntry {
+  change_type: RosterChangeType | string;
+  staff_id?: string;
+  staff_name?: string;
+  staff_initials?: string;
+  from_value?: string;
+  to_value?: string;
+  affected_date?: string;
+  from_shift_id?: string;
+  to_shift_id?: string;
+  from_shift_name?: string;
+  to_shift_name?: string;
+  week_start?: string;
+  airport_id?: string;
+}

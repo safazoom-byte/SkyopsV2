@@ -62,7 +62,9 @@ import {
   Plus,
 } from "lucide-react";
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
-import { db, supabase } from "../services/supabaseService";
+import { db, supabase, logRosterUpdate } from "../services/supabaseService";
+import { UpdatesTab } from "./UpdatesTab";
+import { UserProfile } from "../types";
 
 interface Props {
   programs: DailyProgram[];
@@ -77,6 +79,7 @@ interface Props {
   stationHealth: number;
   alerts: { type: "danger" | "warning"; message: string }[];
   minRestHours: number;
+  currentUser?: UserProfile | null;
   onUpdatePrograms: (p: DailyProgram[], changedDates?: string[]) => void;
   onRestoreVersion: (v: ProgramVersion) => void;
   onUpdateLeaves?: (l: LeaveRequest[]) => void;
@@ -96,6 +99,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   endDate,
   stationHealth,
   minRestHours,
+  currentUser,
   onUpdatePrograms,
   onRestoreVersion,
   onUpdateLeaves,
@@ -108,7 +112,7 @@ export const ProgramDisplay: React.FC<Props> = ({
   const [versions, setVersions] = useState<ProgramVersion[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    "Daily" | "Program Check" | "Matrix" | "Roles" | "Staff Checks"
+    "Daily" | "Program Check" | "Matrix" | "Roles" | "Staff Checks" | "Updates Logs"
   >("Daily");
   const [unlockAbsences, setUnlockAbsences] = useState(false);
   const [noteModal, setNoteModal] = useState<{dateString: string, shiftId: string, currentNote: string} | null>(null);
@@ -590,6 +594,40 @@ export const ProgramDisplay: React.FC<Props> = ({
     });
   };
 
+  const getAssignmentStartDateTime = (dateString: string, shiftPickupTime: string, customStartTime?: string): Date => {
+    const startStr = customStartTime || shiftPickupTime;
+    const [ph, pm] = startStr.split(":").map(Number);
+    const dt = new Date(`${dateString}T12:00:00Z`);
+    dt.setHours(ph, pm, 0, 0);
+
+    // If customStartTime was given as late evening (e.g. >= 18:00)
+    // but the original shift is in the early morning (e.g. <= 06:00),
+    // then the shift actually started the previous night!
+    if (customStartTime) {
+      const [origH] = shiftPickupTime.split(":").map(Number);
+      if (ph >= 18 && origH <= 6) {
+        dt.setUTCDate(dt.getUTCDate() - 1);
+      }
+    }
+    return dt;
+  };
+
+  const getAssignmentEndDateTime = (dateString: string, shiftPickupTime: string, shiftEndTime: string, customStartTime?: string, releaseTime?: string): Date => {
+    const startDt = getAssignmentStartDateTime(dateString, shiftPickupTime, customStartTime);
+    const endStr = releaseTime || shiftEndTime;
+    const [sh, sm] = endStr.split(":").map(Number);
+    
+    // Base end datetime on the start datetime's date
+    const endDt = new Date(startDt);
+    endDt.setHours(sh, sm, 0, 0);
+    
+    // If end time is earlier than or equal to start time, it crossed midnight into next day
+    if (endDt.getTime() <= startDt.getTime()) {
+      endDt.setUTCDate(endDt.getUTCDate() + 1);
+    }
+    return endDt;
+  };
+
   const getStaffDayWorkingHours = (staffId: string, dateString: string, pAssignments?: any[]) => {
     const assigns = (pAssignments || (programs.find(p => p.dateString === dateString)?.assignments || [])).filter(
       (a: any) => {
@@ -603,42 +641,35 @@ export const ProgramDisplay: React.FC<Props> = ({
     const hasExt = assigns.some((a: any) => a.isExtension || assigns.some((other: any) => other.isExtension && other.initialShiftId === a.shiftId));
     if (hasExt) {
       // Find the earliest start time among the assignments on that date
-      let earliestMinutes = Infinity;
-      let latestEndMinutes = -Infinity;
+      let earliestTime = Infinity;
+      let latestEndTime = -Infinity;
 
       assigns.forEach((a: any) => {
         const ts = getShift(a.shiftId || "");
         if (!ts) return;
-        const startStr = a.customStartTime || ts.pickupTime;
-        const [sh, sm] = startStr.split(":").map(Number);
-        const startMin = sh * 60 + sm;
-        if (startMin < earliestMinutes) earliestMinutes = startMin;
-
-        const endStr = a.releaseTime || ts.endTime;
-        const [eh, em] = endStr.split(":").map(Number);
-        let endMin = eh * 60 + em;
-        if (endMin < startMin) endMin += 24 * 60; // Overnight
-        if (endMin > latestEndMinutes) latestEndMinutes = endMin;
+        const startDt = getAssignmentStartDateTime(dateString, ts.pickupTime, a.customStartTime);
+        const endDt = getAssignmentEndDateTime(dateString, ts.pickupTime, ts.endTime, a.customStartTime, a.releaseTime);
+        
+        if (startDt.getTime() < earliestTime) earliestTime = startDt.getTime();
+        if (endDt.getTime() > latestEndTime) latestEndTime = endDt.getTime();
       });
 
-      if (earliestMinutes !== Infinity && latestEndMinutes !== -Infinity) {
-        return Math.max(0, (latestEndMinutes - earliestMinutes) / 60);
+      if (earliestTime !== Infinity && latestEndTime !== -Infinity) {
+        return Math.max(0, (latestEndTime - earliestTime) / (1000 * 60 * 60));
       }
     }
 
-    return assigns.reduce((sum: number, a: any) => sum + getShiftHours(a.shiftId || "", a), 0);
+    return assigns.reduce((sum: number, a: any) => sum + getShiftHours(a.shiftId || "", a, dateString), 0);
   };
 
-  const getShiftHours = (shiftId: string, assign?: any) => {
+  const getShiftHours = (shiftId: string, assign?: any, dateString?: string) => {
     const shift = getShift(shiftId);
     if (!shift) return 0;
-    const startStr = assign?.customStartTime || shift.pickupTime;
-    const endStr = assign?.releaseTime ? assign.releaseTime : shift.endTime;
-    const [ph, pm] = startStr.split(":").map(Number);
-    const [sh, sm] = endStr.split(":").map(Number);
-    let hours = sh - ph + (sm - pm) / 60;
-    if (sh < ph) hours += 24;
-    return hours;
+    const baseDate = dateString || shift.pickupDate || startDate;
+    const startDt = getAssignmentStartDateTime(baseDate, shift.pickupTime, assign?.customStartTime);
+    const endDt = getAssignmentEndDateTime(baseDate, shift.pickupTime, shift.endTime, assign?.customStartTime, assign?.releaseTime);
+    const diffMs = endDt.getTime() - startDt.getTime();
+    return Math.max(0, diffMs / (1000 * 60 * 60));
   };
 
   const getStaffTotalHours = (staffId: string) => {
@@ -754,21 +785,14 @@ export const ProgramDisplay: React.FC<Props> = ({
     assigns.forEach((a) => {
       const s = getShift(a.shiftId || "");
       if (s) {
-        const startStr = a.customStartTime || s.pickupTime;
-        const endStr = a.isExtension && a.releaseTime ? a.releaseTime : s.endTime;
-        const [ph, pm] = startStr.split(":").map(Number);
-        const [sh, sm] = endStr.split(":").map(Number);
-        const startDt = new Date(`${a.dateString}T12:00:00Z`);
-        startDt.setHours(ph, pm, 0, 0);
-        const endDt = new Date(`${a.dateString}T12:00:00Z`);
-        endDt.setHours(sh, sm, 0, 0);
-        if (sh < ph) endDt.setUTCDate(endDt.getUTCDate() + 1);
+        const startDt = getAssignmentStartDateTime(a.dateString, s.pickupTime, a.customStartTime);
+        const endDt = getAssignmentEndDateTime(a.dateString, s.pickupTime, s.endTime, a.customStartTime, a.releaseTime);
         
         // We only consider previous shifts (ones that started before this current one).
         // If they end after currentShiftStart, diffMs will be negative and throw a warning.
         if (
-          startDt < currentShiftStart &&
-          (!lastEndTime || endDt > lastEndTime)
+          startDt.getTime() < currentShiftStart.getTime() &&
+          (!lastEndTime || endDt.getTime() > lastEndTime.getTime())
         ) {
           lastEndTime = endDt;
         }
@@ -1313,13 +1337,10 @@ export const ProgramDisplay: React.FC<Props> = ({
           workedCount++;
           const shift = getShift(assign.shiftId || "");
           if (shift) {
-            const pDate = new Date(`${p.dateString!}T12:00:00Z`);
-            const [ph, pm] = (assign.customStartTime || shift.pickupTime).split(":").map(Number);
-            const shiftStart = new Date(pDate);
-            shiftStart.setHours(ph, pm, 0, 0);
+            const shiftStart = getAssignmentStartDateTime(p.dateString!, shift.pickupTime, assign.customStartTime);
             const rest = calculateRestHours(s.id, shiftStart);
             const restWarning = rest !== null && rest < minRestHours;
-            const duration = `${getShiftHours(assign.shiftId || "", assign).toFixed(1)}H`;
+            const duration = `${getShiftHours(assign.shiftId || "", assign, p.dateString!).toFixed(1)}H`;
             const restLabel = rest !== null ? ` [${rest.toFixed(1)}H]` : "";
             const displayTime = assign.customStartTime || shift.pickupTime;
             const cellText = `${duration}\n${displayTime}${restLabel}`;
@@ -2872,6 +2893,57 @@ export const ProgramDisplay: React.FC<Props> = ({
     if (programsChanged) {
         const changedDates = date === targetDate ? [targetDate] : [date, targetDate];
         onUpdatePrograms(newPrograms, changedDates);
+
+        // Auto audit log entry
+        const staffObj = activeStaff.find(s => s.id === staffId);
+        const fromShift = shifts.find(s => s.id === currentShiftId);
+        const toShift = shifts.find(s => s.id === targetShiftId);
+
+        if (!currentShiftId.startsWith("ABSENCE") && currentShiftId !== "OFFDUTY") {
+          if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
+            if (currentShiftId !== targetShiftId || date !== targetDate) {
+              logRosterUpdate({
+                change_type: "SHIFT_CHANGE",
+                staff_id: staffId,
+                staff_name: staffObj?.name,
+                staff_initials: staffObj?.initials,
+                affected_date: targetDate,
+                from_shift_id: currentShiftId,
+                to_shift_id: targetShiftId,
+                from_shift_name: fromShift ? `Shift at ${fromShift.pickupTime}` : currentShiftId,
+                to_shift_name: toShift ? `Shift at ${toShift.pickupTime}` : targetShiftId,
+                from_value: fromShift ? `Shift at ${fromShift.pickupTime}` : currentShiftId,
+                to_value: toShift ? `Shift at ${toShift.pickupTime}` : targetShiftId,
+              }, currentUser);
+            }
+          } else {
+            const destName = targetShiftId.startsWith("ABSENCE_") ? targetShiftId.replace("ABSENCE_", "") : "OFF";
+            logRosterUpdate({
+              change_type: "WORK_TO_DAY_OFF",
+              staff_id: staffId,
+              staff_name: staffObj?.name,
+              staff_initials: staffObj?.initials,
+              affected_date: date,
+              from_shift_id: currentShiftId,
+              from_shift_name: fromShift ? `Shift at ${fromShift.pickupTime}` : currentShiftId,
+              from_value: fromShift ? `Shift at ${fromShift.pickupTime}` : "WORK",
+              to_value: destName,
+            }, currentUser);
+          }
+        } else if (!isTargetAbsence && targetShiftId !== "OFFDUTY") {
+          const srcName = currentShiftId.startsWith("ABSENCE_") ? currentShiftId.replace("ABSENCE_", "") : "OFF";
+          logRosterUpdate({
+            change_type: "DAY_OFF_TO_WORK",
+            staff_id: staffId,
+            staff_name: staffObj?.name,
+            staff_initials: staffObj?.initials,
+            affected_date: targetDate,
+            to_shift_id: targetShiftId,
+            to_shift_name: toShift ? `Shift at ${toShift.pickupTime}` : targetShiftId,
+            from_value: srcName,
+            to_value: toShift ? `Shift at ${toShift.pickupTime}` : "WORK",
+          }, currentUser);
+        }
     }
   };
 
@@ -3150,12 +3222,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       const totalDailyHours = getStaffDayWorkingHours(s.id, p.dateString!, staffAssignsOnDate);
                       const shift = getShift(assign.shiftId || "");
                       if (shift) {
-                        const pDate = new Date(`${p.dateString!}T12:00:00Z`);
-                        const [ph, pm] = (assign.customStartTime || shift.pickupTime)
-                          .split(":")
-                          .map(Number);
-                        const shiftStart = new Date(pDate);
-                        shiftStart.setHours(ph, pm, 0, 0);
+                        const shiftStart = getAssignmentStartDateTime(p.dateString!, shift.pickupTime, assign.customStartTime);
                         const rest = calculateRestHours(s.id, shiftStart);
                         const isDayOffPrev = hasDayOffBefore(s.id, p.dateString!);
                         const restWarning = isDayOffPrev
@@ -3711,6 +3778,7 @@ export const ProgramDisplay: React.FC<Props> = ({
             { id: "Matrix",        icon: Users,          label: "Matrix"  },
             { id: "Roles",         icon: ShieldCheck,    label: "Roles"   },
             { id: "Staff Checks",  icon: AlertTriangle,  label: "Staff"   },
+            { id: "Updates Logs",  icon: History,        label: "Updates Logs" },
           ] as const).map(({ id, icon: Icon, label }) => (
             <button
               key={id}
@@ -3853,7 +3921,16 @@ export const ProgramDisplay: React.FC<Props> = ({
               {activeTab === "Matrix" && renderMatrixTab()}
               {activeTab === "Roles" && renderRolesTab()}
               {activeTab === "Staff Checks" && renderStaffCheckTab()}
-                            {activeTab === "Program Check" && (
+              {activeTab === "Updates Logs" && (
+                <UpdatesTab
+                  staff={staff}
+                  shifts={shifts}
+                  startDate={startDate}
+                  endDate={endDate}
+                  currentUser={currentUser}
+                />
+              )}
+              {activeTab === "Program Check" && (
                 <ProgramCheck
                   staff={staff}
                   shifts={shifts}
@@ -4248,14 +4325,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                                             const st = getStaff(a.staffId);
                                             if (!st) return null;
 
-                                            const pDate = new Date(
+                                            const shiftStart = getAssignmentStartDateTime(
                                               prog.dateString!,
+                                              shift.pickupTime,
+                                              a.customStartTime,
                                             );
-                                            const [ph, pm] = (a.customStartTime || shift.pickupTime)
-                                              .split(":")
-                                              .map(Number);
-                                            const shiftStart = new Date(pDate);
-                                            shiftStart.setHours(ph, pm, 0, 0);
 
                                             const rest = calculateRestHours(
                                               st.id,
@@ -4281,7 +4355,9 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               : colorClassBase;
                                             
                                             let extText = st.initials;
-                                            if (a.customStartTime) {
+                                            if (a.customStartTime && a.releaseTime) {
+                                              extText = `${st.initials}(From ${a.customStartTime}) (till ${a.releaseTime})`;
+                                            } else if (a.customStartTime) {
                                               extText = `${st.initials}(From ${a.customStartTime})`;
                                             } else if (a.releaseTime) {
                                               extText = `${st.initials} (till ${a.releaseTime})`;
