@@ -15,6 +15,8 @@ import {
   DEFAULT_CG_CONFIG,
   RosterUpdate,
   UpdateLogEntry,
+  GlobalAppSettings,
+  DEFAULT_GLOBAL_APP_SETTINGS,
 } from "../types";
 
 const SUPABASE_URL =
@@ -1394,47 +1396,97 @@ export const db = {
     entry: UpdateLogEntry,
     currentUser?: { id?: string; name?: string; email?: string } | null
   ): Promise<void> {
-    if (!supabase) return;
+    const affectedDate =
+      entry.affected_date || new Date().toISOString().split("T")[0];
+    const weekStart = entry.week_start || getMonday(affectedDate);
+
+    let session: any = null;
+    let profile: any = null;
     try {
-      const session = await auth.getSession();
-      const profile = await this.getUserProfile();
-      const userId = currentUser?.id || session?.user?.id || profile?.id || null;
-      const userName =
-        currentUser?.name ||
-        currentUser?.email ||
-        profile?.email ||
-        session?.user?.email ||
-        "System";
-      const airportId = entry.airport_id || profile?.airport_id || null;
+      session = await auth.getSession();
+      profile = await this.getUserProfile();
+    } catch {
+      // ignore
+    }
 
-      const affectedDate =
-        entry.affected_date || new Date().toISOString().split("T")[0];
-      const weekStart = entry.week_start || getMonday(affectedDate);
+    const userId = currentUser?.id || session?.user?.id || profile?.id || null;
+    const userName =
+      currentUser?.name ||
+      currentUser?.email ||
+      profile?.email ||
+      session?.user?.email ||
+      "System";
+    const airportId = entry.airport_id || profile?.airport_id || null;
 
-      await supabase.from("roster_updates").insert({
-        change_type: entry.change_type,
-        staff_id: entry.staff_id || null,
-        staff_name: entry.staff_name || null,
-        staff_initials: entry.staff_initials || null,
-        from_value: entry.from_value || null,
-        to_value: entry.to_value || null,
-        affected_date: affectedDate,
-        from_shift_id: entry.from_shift_id || null,
-        to_shift_id: entry.to_shift_id || null,
-        from_shift_name: entry.from_shift_name || null,
-        to_shift_name: entry.to_shift_name || null,
-        changed_by_id: userId,
-        changed_by_name: userName,
-        changed_at: new Date().toISOString(),
-        week_start: weekStart,
-        airport_id: airportId,
-      });
-    } catch (err) {
-      console.warn("Could not insert roster update to DB:", err);
+    const newRecord: RosterUpdate = {
+      id: crypto.randomUUID(),
+      change_type: entry.change_type,
+      staff_id: entry.staff_id || null,
+      staff_name: entry.staff_name || null,
+      staff_initials: entry.staff_initials || null,
+      from_value: entry.from_value || null,
+      to_value: entry.to_value || null,
+      affected_date: affectedDate,
+      from_shift_id: entry.from_shift_id || null,
+      to_shift_id: entry.to_shift_id || null,
+      from_shift_name: entry.from_shift_name || null,
+      to_shift_name: entry.to_shift_name || null,
+      changed_by_id: userId,
+      changed_by_name: userName,
+      changed_at: new Date().toISOString(),
+      week_start: weekStart,
+      airport_id: airportId,
+    };
+
+    // Save to local storage cache immediately
+    try {
+      const existingStr = localStorage.getItem("skyops_roster_updates");
+      const existing: RosterUpdate[] = existingStr ? JSON.parse(existingStr) : [];
+      const updated = [newRecord, ...existing.filter(r => r.id !== newRecord.id)].slice(0, 500);
+      localStorage.setItem("skyops_roster_updates", JSON.stringify(updated));
+
+      // Broadcast local event for immediate reactivity
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("skyops:roster_update", { detail: newRecord })
+        );
+      }
+    } catch (e) {
+      console.warn("Could not save roster update to localStorage:", e);
+    }
+
+    // Also attempt insertion to Supabase if configured
+    if (supabase) {
+      try {
+        await supabase.from("roster_updates").insert({
+          id: newRecord.id,
+          change_type: newRecord.change_type,
+          staff_id: newRecord.staff_id,
+          staff_name: newRecord.staff_name,
+          staff_initials: newRecord.staff_initials,
+          from_value: newRecord.from_value,
+          to_value: newRecord.to_value,
+          affected_date: newRecord.affected_date,
+          from_shift_id: newRecord.from_shift_id,
+          to_shift_id: newRecord.to_shift_id,
+          from_shift_name: newRecord.from_shift_name,
+          to_shift_name: newRecord.to_shift_name,
+          changed_by_id: newRecord.changed_by_id,
+          changed_by_name: newRecord.changed_by_name,
+          changed_at: newRecord.changed_at,
+          week_start: newRecord.week_start,
+          airport_id: newRecord.airport_id,
+        });
+      } catch (err) {
+        // Table might not exist yet in Postgres, silent fallback is active
+        console.warn("Could not insert roster update to Supabase DB:", err);
+      }
     }
   },
 
   async fetchRosterUpdates(params?: {
+    startDate?: string;
+    endDate?: string;
     weekStart?: string;
     staffId?: string;
     changeType?: string;
@@ -1442,74 +1494,149 @@ export const db = {
     limit?: number;
     offset?: number;
   }): Promise<{ data: RosterUpdate[]; count: number }> {
-    if (!supabase) return { data: [], count: 0 };
+    let profile: any = null;
     try {
-      const profile = await this.getUserProfile();
-      const currentAirportId = params?.airportId || profile?.airport_id;
+      profile = await this.getUserProfile();
+    } catch {
+      // ignore
+    }
+    const currentAirportId = params?.airportId || profile?.airport_id;
 
-      let query = supabase
-        .from("roster_updates")
-        .select("*", { count: "exact" })
-        .order("changed_at", { ascending: false });
+    // First attempt to query Supabase if present
+    if (supabase) {
+      try {
+        let query = supabase
+          .from("roster_updates")
+          .select("*", { count: "exact" })
+          .order("changed_at", { ascending: false });
 
+        if (profile?.role !== "super_admin" && currentAirportId) {
+          query = query.eq("airport_id", currentAirportId);
+        } else if (params?.airportId) {
+          query = query.eq("airport_id", params.airportId);
+        }
+
+        if (params?.startDate && params?.endDate) {
+          query = query
+            .gte("affected_date", params.startDate)
+            .lte("affected_date", params.endDate);
+        } else if (params?.weekStart && params.weekStart !== "ALL") {
+          query = query.eq("week_start", params.weekStart);
+        }
+
+        if (params?.staffId && params.staffId !== "ALL") {
+          query = query.eq("staff_id", params.staffId);
+        }
+
+        if (params?.changeType && params.changeType !== "ALL") {
+          query = query.eq("change_type", params.changeType);
+        }
+
+        const limit = params?.limit || 100;
+        const offset = params?.offset || 0;
+        query = query.range(offset, offset + limit - 1);
+
+        const { data, count, error } = await query;
+        if (!error && data && data.length > 0) {
+          return {
+            data: data.map((d: any) => ({
+              id: d.id,
+              change_type: d.change_type,
+              staff_id: d.staff_id,
+              staff_name: d.staff_name,
+              staff_initials: d.staff_initials,
+              from_value: d.from_value,
+              to_value: d.to_value,
+              affected_date: d.affected_date,
+              from_shift_id: d.from_shift_id,
+              to_shift_id: d.to_shift_id,
+              from_shift_name: d.from_shift_name,
+              to_shift_name: d.to_shift_name,
+              changed_by_id: d.changed_by_id,
+              changed_by_name: d.changed_by_name,
+              changed_at: d.changed_at,
+              week_start: d.week_start,
+              airport_id: d.airport_id,
+            })),
+            count: count || data.length,
+          };
+        }
+      } catch (err) {
+        console.warn("Falling back to local roster updates cache:", err);
+      }
+    }
+
+    // Fallback: load from localStorage
+    try {
+      const stored = localStorage.getItem("skyops_roster_updates");
+      let list: RosterUpdate[] = stored ? JSON.parse(stored) : [];
+
+      // Filter by airport if not super_admin
       if (profile?.role !== "super_admin" && currentAirportId) {
-        query = query.eq("airport_id", currentAirportId);
-      } else if (params?.airportId) {
-        query = query.eq("airport_id", params.airportId);
+        list = list.filter(r => !r.airport_id || r.airport_id === currentAirportId);
       }
 
-      if (params?.weekStart && params.weekStart !== "ALL") {
-        query = query.eq("week_start", params.weekStart);
+      // Filter by Date Range (startDate & endDate)
+      if (params?.startDate && params?.endDate) {
+        list = list.filter(r => {
+          if (!r.affected_date) return false;
+          return r.affected_date >= params.startDate! && r.affected_date <= params.endDate!;
+        });
+      } else if (params?.weekStart && params.weekStart !== "ALL") {
+        list = list.filter(r => {
+          const w = r.week_start || (r.affected_date ? getMonday(r.affected_date) : "");
+          return w === params.weekStart;
+        });
       }
 
+      // Filter by Staff
       if (params?.staffId && params.staffId !== "ALL") {
-        query = query.eq("staff_id", params.staffId);
+        list = list.filter(r => r.staff_id === params.staffId);
       }
 
+      // Filter by Change Type
       if (params?.changeType && params.changeType !== "ALL") {
-        query = query.eq("change_type", params.changeType);
+        list = list.filter(r => r.change_type === params.changeType);
       }
 
-      const limit = params?.limit || 50;
+      // Sort descending by changed_at
+      list.sort((a, b) => {
+        const tA = a.changed_at ? new Date(a.changed_at).getTime() : 0;
+        const tB = b.changed_at ? new Date(b.changed_at).getTime() : 0;
+        return tB - tA;
+      });
+
+      const totalCount = list.length;
       const offset = params?.offset || 0;
-      query = query.range(offset, offset + limit - 1);
+      const limit = params?.limit || 100;
+      const paged = list.slice(offset, offset + limit);
 
-      const { data, count, error } = await query;
-      if (error) {
-        console.warn("Could not fetch roster updates:", error.message);
-        return { data: [], count: 0 };
-      }
-
-      return {
-        data: (data || []).map((d: any) => ({
-          id: d.id,
-          change_type: d.change_type,
-          staff_id: d.staff_id,
-          staff_name: d.staff_name,
-          staff_initials: d.staff_initials,
-          from_value: d.from_value,
-          to_value: d.to_value,
-          affected_date: d.affected_date,
-          from_shift_id: d.from_shift_id,
-          to_shift_id: d.to_shift_id,
-          from_shift_name: d.from_shift_name,
-          to_shift_name: d.to_shift_name,
-          changed_by_id: d.changed_by_id,
-          changed_by_name: d.changed_by_name,
-          changed_at: d.changed_at,
-          week_start: d.week_start,
-          airport_id: d.airport_id,
-        })),
-        count: count || 0,
-      };
-    } catch (err) {
-      console.warn("Error in fetchRosterUpdates:", err);
+      return { data: paged, count: totalCount };
+    } catch (e) {
+      console.warn("Error reading local roster updates:", e);
       return { data: [], count: 0 };
     }
   },
 
   subscribeRosterUpdates(onInsert: (update: RosterUpdate) => void) {
-    if (!supabase) return () => {};
+    // Listen to window custom events for immediate local dispatch
+    const handleLocalEvent = (e: any) => {
+      if (e.detail) {
+        onInsert(e.detail as RosterUpdate);
+      }
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("skyops:roster_update", handleLocalEvent);
+    }
+
+    if (!supabase) {
+      return () => {
+        if (typeof window !== "undefined") {
+          window.removeEventListener("skyops:roster_update", handleLocalEvent);
+        }
+      };
+    }
+
     const channel = supabase
       .channel("roster_updates_channel")
       .on(
@@ -1528,6 +1655,9 @@ export const db = {
       .subscribe();
 
     return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("skyops:roster_update", handleLocalEvent);
+      }
       supabase?.removeChannel(channel);
     };
   },
@@ -1722,6 +1852,156 @@ export const db = {
       console.warn("Exception upserting cg_rating:", e);
       return false;
     }
+  },
+
+  async getGlobalAppSettings(): Promise<GlobalAppSettings> {
+    const fallback: GlobalAppSettings = (() => {
+      try {
+        const stored = localStorage.getItem("skyops_global_app_settings");
+        if (stored) return { ...DEFAULT_GLOBAL_APP_SETTINGS, ...JSON.parse(stored) };
+      } catch {}
+      // Migration from legacy keys if available
+      try {
+        const hideDrv = localStorage.getItem("hideDrivers_global") === "true";
+        const hideLab = localStorage.getItem("hideLabour_global") === "true";
+        const hideSec = localStorage.getItem("hideSecurity_global") === "true";
+        const hideAcc = localStorage.getItem("hideAccountants_global") === "true";
+        const ckiRaw = localStorage.getItem("cki_config_global");
+        return {
+          ...DEFAULT_GLOBAL_APP_SETTINGS,
+          hideDriversOffDuty: hideDrv,
+          hideLabourOffDuty: hideLab,
+          hideSecurityOffDuty: hideSec,
+          hideAccountantsOffDuty: hideAcc,
+          ckiConfig: ckiRaw ? JSON.parse(ckiRaw) : DEFAULT_GLOBAL_APP_SETTINGS.ckiConfig,
+        };
+      } catch {
+        return DEFAULT_GLOBAL_APP_SETTINGS;
+      }
+    })();
+
+    if (!supabase) {
+      return fallback;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .select("id, email, prepared_by, revised_by")
+        .eq("id", "GLOBAL_APP_SETTINGS")
+        .maybeSingle();
+
+      if (error || !data) {
+        return fallback;
+      }
+
+      if (data.prepared_by) {
+        try {
+          const parsed = JSON.parse(data.prepared_by);
+          const merged: GlobalAppSettings = {
+            ...DEFAULT_GLOBAL_APP_SETTINGS,
+            ...parsed,
+          };
+          localStorage.setItem("skyops_global_app_settings", JSON.stringify(merged));
+          return merged;
+        } catch {
+          return fallback;
+        }
+      }
+      return fallback;
+    } catch (e) {
+      console.warn("Exception fetching global app settings:", e);
+      return fallback;
+    }
+  },
+
+  async upsertGlobalAppSettings(settings: Partial<GlobalAppSettings>): Promise<GlobalAppSettings> {
+    const current = await this.getGlobalAppSettings();
+    const updated: GlobalAppSettings = {
+      ...current,
+      ...settings,
+    };
+
+    // Save locally
+    try {
+      localStorage.setItem("skyops_global_app_settings", JSON.stringify(updated));
+      localStorage.setItem("hideDrivers_global", updated.hideDriversOffDuty ? "true" : "false");
+      localStorage.setItem("hideLabour_global", updated.hideLabourOffDuty ? "true" : "false");
+      localStorage.setItem("hideSecurity_global", updated.hideSecurityOffDuty ? "true" : "false");
+      localStorage.setItem("hideAccountants_global", updated.hideAccountantsOffDuty ? "true" : "false");
+      if (updated.ckiConfig) {
+        localStorage.setItem("cki_config_global", JSON.stringify(updated.ckiConfig));
+      }
+    } catch {}
+
+    // Dispatch broadcast event in window so other local tabs/components update instantly
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("skyops:global_settings_changed", { detail: updated }));
+    }
+
+    if (!supabase) {
+      return updated;
+    }
+
+    try {
+      const payload = {
+        id: "GLOBAL_APP_SETTINGS",
+        email: "system.settings@skyops.app",
+        role: "admin",
+        prepared_by: JSON.stringify(updated),
+        is_active: true,
+      };
+
+      await supabase.from("user_profiles").upsert(payload, { onConflict: "id" });
+      this.logAction("UPDATE", "USER_PROFILE", "GLOBAL_APP_SETTINGS", "Updated global application settings");
+      return updated;
+    } catch (e) {
+      console.warn("Exception upserting global app settings:", e);
+      return updated;
+    }
+  },
+
+  subscribeGlobalAppSettings(callback: (settings: GlobalAppSettings) => void) {
+    if (typeof window !== "undefined") {
+      const handler = (e: any) => {
+        if (e.detail) callback(e.detail);
+      };
+      window.addEventListener("skyops:global_settings_changed", handler);
+    }
+
+    if (!supabase) {
+      return () => {};
+    }
+
+    const channel = supabase
+      .channel("realtime:global_app_settings")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "user_profiles",
+          filter: "id=eq.GLOBAL_APP_SETTINGS",
+        },
+        (payload: any) => {
+          if (payload.new && payload.new.prepared_by) {
+            try {
+              const parsed = JSON.parse(payload.new.prepared_by);
+              const merged: GlobalAppSettings = {
+                ...DEFAULT_GLOBAL_APP_SETTINGS,
+                ...parsed,
+              };
+              localStorage.setItem("skyops_global_app_settings", JSON.stringify(merged));
+              callback(merged);
+            } catch {}
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   },
 
   async exportDatabase() {

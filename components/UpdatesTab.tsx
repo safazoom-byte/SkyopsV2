@@ -7,7 +7,6 @@ import {
   UserMinus,
   Clock,
   Search,
-  RotateCcw,
   Calendar,
   Filter,
   Users,
@@ -16,9 +15,10 @@ import {
   CheckCircle2,
   RefreshCw,
   Sparkles,
+  Download,
 } from "lucide-react";
 import { Staff, ShiftConfig, RosterUpdate, UserProfile } from "../types";
-import { db, getMonday } from "../services/supabaseService";
+import { db } from "../services/supabaseService";
 
 interface UpdatesTabProps {
   staff: Staff[];
@@ -102,39 +102,11 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
   const PAGE_SIZE = 50;
 
   // Filters
-  const currentWeekMonday = useMemo(() => {
-    return startDate ? getMonday(startDate) : getMonday(new Date().toISOString().split("T")[0]);
-  }, [startDate]);
-
-  const [selectedWeek, setSelectedWeek] = useState<string>(currentWeekMonday);
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedStaffId, setSelectedStaffId] = useState<string>("ALL");
   const [selectedChangeType, setSelectedChangeType] = useState<string>("ALL");
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Generate available week options (current week +- 8 weeks)
-  const availableWeeks = useMemo(() => {
-    const weeks: { monday: string; label: string }[] = [];
-    const baseDate = new Date(`${currentWeekMonday}T12:00:00Z`);
-
-    for (let i = -6; i <= 6; i++) {
-      const wDate = new Date(baseDate);
-      wDate.setUTCDate(wDate.getUTCDate() + i * 7);
-      const mStr = wDate.toISOString().split("T")[0];
-      const sundayDate = new Date(wDate);
-      sundayDate.setUTCDate(sundayDate.getUTCDate() + 6);
-
-      const mMonth = wDate.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
-      const sMonth = sundayDate.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
-      const isCurrent = mStr === currentWeekMonday;
-
-      weeks.push({
-        monday: mStr,
-        label: `Week of ${mMonth} – ${sMonth} ${isCurrent ? "(Current)" : ""}`,
-      });
-    }
-    return weeks;
-  }, [currentWeekMonday]);
-
-  // Load updates
+  // Load updates for the active program period (startDate to endDate)
   const loadUpdates = useCallback(
     async (reset = false) => {
       if (reset) {
@@ -146,7 +118,9 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
 
       const offset = reset ? 0 : pageOffset;
       const res = await db.fetchRosterUpdates({
-        weekStart: selectedWeek === "ALL" ? undefined : selectedWeek,
+        startDate: startDate,
+        endDate: endDate,
+        staffId: selectedStaffId === "ALL" ? undefined : selectedStaffId,
         changeType: selectedChangeType === "ALL" ? undefined : selectedChangeType,
         limit: PAGE_SIZE,
         offset: offset,
@@ -165,26 +139,32 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
       setLoading(false);
       setLoadingMore(false);
     },
-    [selectedWeek, selectedChangeType, pageOffset]
+    [startDate, endDate, selectedStaffId, selectedChangeType, pageOffset]
   );
 
-  // Initial and on-filter change load
+  // Reload whenever current program dates or filters change
   useEffect(() => {
     loadUpdates(true);
-  }, [selectedWeek, selectedChangeType]);
+  }, [startDate, endDate, selectedStaffId, selectedChangeType]);
 
-  // Real-time subscription
+  // Real-time updates subscription
   useEffect(() => {
     const unsubscribe = db.subscribeRosterUpdates((newEntry) => {
-      // Check if entry fits current filter
-      if (selectedWeek !== "ALL" && newEntry.week_start && newEntry.week_start !== selectedWeek) {
+      // Bounded strictly to current program period
+      if (startDate && endDate && newEntry.affected_date) {
+        if (newEntry.affected_date < startDate || newEntry.affected_date > endDate) {
+          return;
+        }
+      }
+
+      if (selectedStaffId !== "ALL" && newEntry.staff_id !== selectedStaffId) {
         return;
       }
       if (selectedChangeType !== "ALL" && newEntry.change_type !== selectedChangeType) {
         return;
       }
+
       setUpdates((prev) => {
-        // avoid duplicate if already present
         if (prev.some((u) => u.id === newEntry.id)) return prev;
         return [newEntry, ...prev];
       });
@@ -194,9 +174,9 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [selectedWeek, selectedChangeType]);
+  }, [startDate, endDate, selectedStaffId, selectedChangeType]);
 
-  // Filtered in-memory by search query (staff name or initials or user)
+  // Filtered in-memory by search query
   const filteredUpdates = useMemo(() => {
     if (!searchQuery.trim()) return updates;
     const q = searchQuery.toLowerCase().trim();
@@ -214,33 +194,43 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
     });
   }, [updates, searchQuery]);
 
-  // Summary Metrics
-  const metrics = useMemo(() => {
-    let total = updates.length;
-    let shiftChanges = 0;
-    let offWorkSwaps = 0;
-    const uniqueUsers = new Set<string>();
+  const handleExportCSV = () => {
+    if (filteredUpdates.length === 0) return;
+    const headers = [
+      "Timestamp",
+      "Date",
+      "Change Type",
+      "Staff Initials",
+      "Staff Name",
+      "From Value",
+      "To Value",
+      "Changed By",
+    ];
 
-    updates.forEach((u) => {
-      if (u.change_type === "SHIFT_CHANGE") shiftChanges++;
-      if (u.change_type === "DAY_OFF_TO_WORK" || u.change_type === "WORK_TO_DAY_OFF") {
-        offWorkSwaps++;
-      }
-      if (u.changed_by_name) uniqueUsers.add(u.changed_by_name);
-    });
+    const rows = filteredUpdates.map((u) => [
+      u.changed_at ? new Date(u.changed_at).toISOString() : "",
+      u.affected_date || "",
+      u.change_type || "",
+      u.staff_initials || "",
+      `"${(u.staff_name || "").replace(/"/g, '""')}"`,
+      `"${(u.from_shift_name || u.from_value || "").replace(/"/g, '""')}"`,
+      `"${(u.to_shift_name || u.to_value || "").replace(/"/g, '""')}"`,
+      `"${(u.changed_by_name || "").replace(/"/g, '""')}"`,
+    ]);
 
-    return {
-      total,
-      shiftChanges,
-      offWorkSwaps,
-      userCount: uniqueUsers.size,
-    };
-  }, [updates]);
-
-  const handleClearFilters = () => {
-    setSelectedWeek(currentWeekMonday);
-    setSelectedChangeType("ALL");
-    setSearchQuery("");
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute(
+      "download",
+      `SkyOPS_Updates_${startDate || "Period"}_to_${endDate || "Period"}.csv`
+    );
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getBadgeConfig = (type: string) => {
@@ -311,6 +301,35 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
     }
   };
 
+  // Summary Metrics
+  const metrics = useMemo(() => {
+    let total = updates.length;
+    let shiftChanges = 0;
+    let offWorkSwaps = 0;
+    const uniqueUsers = new Set<string>();
+
+    updates.forEach((u) => {
+      if (u.change_type === "SHIFT_CHANGE") shiftChanges++;
+      if (u.change_type === "DAY_OFF_TO_WORK" || u.change_type === "WORK_TO_DAY_OFF") {
+        offWorkSwaps++;
+      }
+      if (u.changed_by_name) uniqueUsers.add(u.changed_by_name);
+    });
+
+    return {
+      total,
+      shiftChanges,
+      offWorkSwaps,
+      userCount: uniqueUsers.size,
+    };
+  }, [updates]);
+
+  const periodDisplayLabel = useMemo(() => {
+    return startDate && endDate
+      ? `${formatShortDate(startDate)} – ${formatShortDate(endDate)}`
+      : "Active Program Period";
+  }, [startDate, endDate]);
+
   return (
     <div id="updates-logs-container" className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* ─────────────────────────────────────────
@@ -321,31 +340,16 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
         className="sticky top-[125px] z-30 bg-slate-50/95 backdrop-blur-md pt-2 pb-4 px-1"
       >
         <div className="bg-white border border-slate-200/90 rounded-2xl p-3 md:p-4 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-          {/* Left filters: Week + Search */}
+          {/* Left filters & Program Period Badge */}
           <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* Week Selector */}
-            <div className="relative min-w-[200px] flex-1 sm:flex-none">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                <Calendar size={15} />
-              </div>
-              <select
-                id="filter-week-select"
-                aria-label="Filter roster changes by week"
-                value={selectedWeek}
-                onChange={(e) => setSelectedWeek(e.target.value)}
-                className="w-full pl-9 pr-8 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 transition-colors focus:ring-2 focus:ring-indigo-500 focus:outline-none cursor-pointer"
-              >
-                <option value="ALL">All Recorded Weeks</option>
-                {availableWeeks.map((w) => (
-                  <option key={w.monday} value={w.monday}>
-                    {w.label}
-                  </option>
-                ))}
-              </select>
+            {/* Active Program Period Badge */}
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-indigo-50 border border-indigo-200/80 rounded-xl text-xs font-bold text-indigo-950 shrink-0">
+              <Calendar size={14} className="text-indigo-600 shrink-0" />
+              <span>Program: {periodDisplayLabel}</span>
             </div>
 
             {/* Staff Search */}
-            <div className="relative min-w-[220px] flex-1">
+            <div className="relative min-w-[200px] flex-1">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                 <Search size={15} />
               </div>
@@ -360,7 +364,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 font-bold"
                 >
                   ×
                 </button>
@@ -368,7 +372,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
             </div>
 
             {/* Change Type Dropdown */}
-            <div className="relative min-w-[170px] flex-1 sm:flex-none">
+            <div className="relative min-w-[160px] flex-1 sm:flex-none">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                 <Filter size={14} />
               </div>
@@ -388,8 +392,18 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
             </div>
           </div>
 
-          {/* Action buttons: Reset & Refresh */}
+          {/* Action buttons: Export CSV & Refresh */}
           <div className="flex items-center gap-2 self-end lg:self-auto shrink-0">
+            <button
+              id="btn-export-csv"
+              onClick={handleExportCSV}
+              title="Export updates to CSV"
+              disabled={filteredUpdates.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors disabled:opacity-40"
+            >
+              <Download size={13} />
+              <span>CSV</span>
+            </button>
             <button
               id="btn-refresh-updates"
               onClick={() => loadUpdates(true)}
@@ -399,15 +413,20 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
             >
               <RefreshCw size={15} className={loading ? "animate-spin text-indigo-600" : ""} />
             </button>
-            <button
-              id="btn-clear-filters"
-              onClick={handleClearFilters}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
-            >
-              <RotateCcw size={13} />
-              <span>Reset</span>
-            </button>
           </div>
+        </div>
+
+        {/* Active scope indicator pill */}
+        <div className="mt-2 px-2 flex items-center justify-between text-[11px] font-bold text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Scope: Active Program Period ({periodDisplayLabel})</span>
+          </div>
+          {filteredUpdates.length > 0 && (
+            <span>
+              {filteredUpdates.length} change{filteredUpdates.length === 1 ? "" : "s"} logged
+            </span>
+          )}
         </div>
       </div>
 
@@ -419,7 +438,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
         <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex items-center justify-between">
           <div>
             <span className="text-[11px] font-black uppercase tracking-wider text-slate-400 block mb-1">
-              Total Updates
+              Period Updates
             </span>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
@@ -508,16 +527,16 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
           <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm">
             <RefreshCw size={28} className="animate-spin text-indigo-600 mx-auto mb-3" />
             <p className="text-sm font-bold text-slate-700">Loading audit history...</p>
-            <p className="text-xs text-slate-400 mt-1">Fetching roster changes from database</p>
+            <p className="text-xs text-slate-400 mt-1">Fetching roster changes for {periodDisplayLabel}</p>
           </div>
         ) : filteredUpdates.length === 0 ? (
           <div className="bg-white border border-slate-200 border-dashed rounded-2xl p-12 text-center shadow-sm">
             <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <CheckCircle2 size={24} />
             </div>
-            <p className="text-sm font-bold text-slate-700">No Roster Changes Found</p>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-              All roster adjustments (shift drag-and-drop, day off toggles, staff assignments) are automatically recorded here.
+            <p className="text-sm font-bold text-slate-700">No Roster Changes Found in This Period</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+              Any roster edits made during this program period (e.g. shift swaps, day off allocations, time edits) will automatically appear here in real time.
             </p>
           </div>
         ) : (
@@ -544,7 +563,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
                         {badge.label}
                       </span>
                       {entry.affected_date && (
-                        <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                        <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
                           📅 {formatShortDate(entry.affected_date)}
                         </span>
                       )}
@@ -569,7 +588,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
                       </div>
                       <div>
                         <span className="text-sm font-black text-slate-900 block leading-tight">
-                          {entry.staff_name || "Unassigned Staff"}
+                          {entry.staff_name || "Staff Member"}
                         </span>
                         {entry.staff_initials && (
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -601,9 +620,9 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
                         {entry.changed_by_name || "System"}
                       </strong>
                     </span>
-                    {entry.week_start && (
+                    {entry.affected_date && (
                       <span className="text-[10px] text-slate-400 font-semibold">
-                        Week Ref: {entry.week_start}
+                        Target Date: {entry.affected_date}
                       </span>
                     )}
                   </div>
@@ -639,3 +658,4 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
     </div>
   );
 };
+

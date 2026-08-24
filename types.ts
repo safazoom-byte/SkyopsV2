@@ -163,6 +163,34 @@ export const DEFAULT_LEAVE_POLICY: LeavePolicyConfig = {
   ],
 };
 
+export interface GlobalAppSettings {
+  minOffDayHours: number;
+  maxOffDayHours: number;
+  hideDriversOffDuty: boolean;
+  hideLabourOffDuty: boolean;
+  hideSecurityOffDuty: boolean;
+  hideAccountantsOffDuty: boolean;
+  ckiConfig?: CkiConfig;
+  leavePolicy?: LeavePolicyConfig;
+}
+
+export const DEFAULT_GLOBAL_APP_SETTINGS: GlobalAppSettings = {
+  minOffDayHours: 23,
+  maxOffDayHours: 27,
+  hideDriversOffDuty: false,
+  hideLabourOffDuty: false,
+  hideSecurityOffDuty: false,
+  hideAccountantsOffDuty: false,
+  ckiConfig: {
+    enabled: false,
+    intlMinutesBefore: 150,
+    domMinutesBefore: 90,
+    domesticCodes: ["CAI", "LXR", "HBE", "SSH", "ASW", "HRG", "MUH"],
+    overrides: [],
+  },
+  leavePolicy: DEFAULT_LEAVE_POLICY,
+};
+
 export interface PeriodSettings {
   preparedBy?: string;
   revisedBy?: string;

@@ -64,7 +64,7 @@ import {
 import { DAYS_OF_WEEK_FULL, AVAILABLE_SKILLS } from "../constants";
 import { db, supabase, logRosterUpdate } from "../services/supabaseService";
 import { UpdatesTab } from "./UpdatesTab";
-import { UserProfile } from "../types";
+import { UserProfile, GlobalAppSettings, DEFAULT_GLOBAL_APP_SETTINGS } from "../types";
 
 interface Props {
   programs: DailyProgram[];
@@ -203,20 +203,48 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
     };
     fetchProfileAndCg();
+
+    // Fetch and subscribe to global app settings from DB (syncs across all devices & users)
+    const loadGlobalSettings = async () => {
+      try {
+        const globalSettings = await db.getGlobalAppSettings();
+        setMinOffDayHours(globalSettings.minOffDayHours ?? 23);
+        setMaxOffDayHours(globalSettings.maxOffDayHours ?? 27);
+        setHideDriversOffDuty(!!globalSettings.hideDriversOffDuty);
+        setHideLabourOffDuty(!!globalSettings.hideLabourOffDuty);
+        setHideSecurityOffDuty(!!globalSettings.hideSecurityOffDuty);
+        setHideAccountantsOffDuty(!!globalSettings.hideAccountantsOffDuty);
+        if (globalSettings.ckiConfig) {
+          setActiveCkiConfig(globalSettings.ckiConfig);
+        }
+      } catch (err) {
+        console.error("Error loading global app settings:", err);
+      }
+    };
+    loadGlobalSettings();
+
+    const unsubscribeGlobal = db.subscribeGlobalAppSettings((updatedSettings) => {
+      setMinOffDayHours(updatedSettings.minOffDayHours ?? 23);
+      setMaxOffDayHours(updatedSettings.maxOffDayHours ?? 27);
+      setHideDriversOffDuty(!!updatedSettings.hideDriversOffDuty);
+      setHideLabourOffDuty(!!updatedSettings.hideLabourOffDuty);
+      setHideSecurityOffDuty(!!updatedSettings.hideSecurityOffDuty);
+      setHideAccountantsOffDuty(!!updatedSettings.hideAccountantsOffDuty);
+      if (updatedSettings.ckiConfig) {
+        setActiveCkiConfig(updatedSettings.ckiConfig);
+      }
+    });
+
+    return () => {
+      if (unsubscribeGlobal) unsubscribeGlobal();
+    };
   }, []);
 
+  // Signatures (Staff Excel) are strictly tied to the active program period (startDate to endDate)
   useEffect(() => {
     const keyPrefix = `${startDate}_${endDate}`;
     const savedPrep = localStorage.getItem(`prep_${keyPrefix}`);
     const savedRev = localStorage.getItem(`rev_${keyPrefix}`);
-    const savedMin = localStorage.getItem(`minOffDay_${keyPrefix}`);
-    const savedMax = localStorage.getItem(`maxOffDay_${keyPrefix}`);
-    
-    const savedHideDrivers = localStorage.getItem("hideDrivers_global") === "true";
-    const savedHideLabour = localStorage.getItem("hideLabour_global") === "true";
-    const savedHideSecurity = localStorage.getItem("hideSecurity_global") === "true";
-    const savedHideAccountants = localStorage.getItem("hideAccountants_global") === "true";
-    const savedCkiRaw = localStorage.getItem("cki_config_global");
 
     const activeRangePrograms = programs.filter(
       (p) => p.dateString && p.dateString >= startDate && p.dateString <= endDate
@@ -225,30 +253,10 @@ export const ProgramDisplay: React.FC<Props> = ({
 
     let activePrep = "";
     let activeRev = "";
-    let activeMin = 23;
-    let activeMax = 27;
-    let loadedCki: CkiConfig = {
-      enabled: false,
-      intlMinutesBefore: 150,
-      domMinutesBefore: 90,
-      domesticCodes: ["CAI", "LXR", "HBE", "SSH", "ASW", "HRG", "MUH"],
-      overrides: [],
-    };
-
-    if (savedCkiRaw) {
-      try {
-        loadedCki = { ...loadedCki, ...JSON.parse(savedCkiRaw) };
-      } catch (e) {}
-    }
 
     if (dbSettings) {
       activePrep = dbSettings.preparedBy ?? (savedPrep !== null ? savedPrep : "");
       activeRev = dbSettings.revisedBy ?? (savedRev !== null ? savedRev : "");
-      activeMin = dbSettings.minOffDayHours !== undefined ? dbSettings.minOffDayHours : (savedMin !== null ? Number(savedMin) : 23);
-      activeMax = dbSettings.maxOffDayHours !== undefined ? dbSettings.maxOffDayHours : (savedMax !== null ? Number(savedMax) : 27);
-      if (dbSettings.ckiConfig) {
-        loadedCki = { ...loadedCki, ...dbSettings.ckiConfig };
-      }
     } else {
       if (savedPrep !== null) {
         activePrep = savedPrep;
@@ -256,23 +264,10 @@ export const ProgramDisplay: React.FC<Props> = ({
       if (savedRev !== null) {
         activeRev = savedRev;
       }
-      if (savedMin !== null) {
-        activeMin = Number(savedMin);
-      }
-      if (savedMax !== null) {
-        activeMax = Number(savedMax);
-      }
     }
 
     setPeriodPreparedBy(activePrep);
     setPeriodRevisedBy(activeRev);
-    setMinOffDayHours(activeMin);
-    setMaxOffDayHours(activeMax);
-    setHideDriversOffDuty(savedHideDrivers);
-    setHideLabourOffDuty(savedHideLabour);
-    setHideSecurityOffDuty(savedHideSecurity);
-    setHideAccountantsOffDuty(savedHideAccountants);
-    setActiveCkiConfig(loadedCki);
   }, [startDate, endDate, programs]);
 
   const handleSaveSettings = async (
@@ -282,29 +277,40 @@ export const ProgramDisplay: React.FC<Props> = ({
     maxH: number,
     ckiConf?: CkiConfig
   ) => {
+    // 1. Signatures strictly saved per active program period
     const keyPrefix = `${startDate}_${endDate}`;
     localStorage.setItem(`prep_${keyPrefix}`, prep);
     localStorage.setItem(`rev_${keyPrefix}`, rev);
-    localStorage.setItem(`minOffDay_${keyPrefix}`, minH.toString());
-    localStorage.setItem(`maxOffDay_${keyPrefix}`, maxH.toString());
-    localStorage.setItem("hideDrivers_global", tempHideDrivers.toString());
-    localStorage.setItem("hideLabour_global", tempHideLabour.toString());
-    localStorage.setItem("hideSecurity_global", tempHideSecurity.toString());
-    localStorage.setItem("hideAccountants_global", tempHideAccountants.toString());
-    if (ckiConf) {
-      localStorage.setItem("cki_config_global", JSON.stringify(ckiConf));
-      setActiveCkiConfig(ckiConf);
-    }
-    
     setPeriodPreparedBy(prep);
     setPeriodRevisedBy(rev);
+
+    // 2. All other settings saved globally to Supabase and synced across all devices
+    const globalPayload: GlobalAppSettings = {
+      minOffDayHours: minH,
+      maxOffDayHours: maxH,
+      hideDriversOffDuty: tempHideDrivers,
+      hideLabourOffDuty: tempHideLabour,
+      hideSecurityOffDuty: tempHideSecurity,
+      hideAccountantsOffDuty: tempHideAccountants,
+      ckiConfig: ckiConf || activeCkiConfig,
+    };
+
     setMinOffDayHours(minH);
     setMaxOffDayHours(maxH);
     setHideDriversOffDuty(tempHideDrivers);
     setHideLabourOffDuty(tempHideLabour);
     setHideSecurityOffDuty(tempHideSecurity);
     setHideAccountantsOffDuty(tempHideAccountants);
+    if (ckiConf) {
+      setActiveCkiConfig(ckiConf);
+    }
 
+    // Persist global settings to DB in background
+    db.upsertGlobalAppSettings(globalPayload).catch((err) => {
+      console.warn("Failed to sync global settings to DB:", err);
+    });
+
+    // 3. Save signatures to the current program period in DB
     const newPeriodSettings: PeriodSettings = {
       preparedBy: prep,
       revisedBy: rev,
@@ -2757,6 +2763,20 @@ export const ProgramDisplay: React.FC<Props> = ({
 
     if (onUpdatePrograms) {
       onUpdatePrograms(newPrograms, Array.from(datesToUpdate));
+
+      // Log extension / action
+      const staffObj = activeStaff.find(s => s.id === staffId);
+      logRosterUpdate({
+        change_type: "SHIFT_CHANGE",
+        staff_id: staffId,
+        staff_name: staffObj?.name,
+        staff_initials: staffObj?.initials,
+        affected_date: date,
+        to_shift_id: targetShift.id,
+        to_shift_name: `Extended to Shift ${targetShift.pickupTime || ""}-${targetShift.endTime || ""}`,
+        from_value: initialShift ? `Shift at ${initialShift.pickupTime}` : "None",
+        to_value: `Shift at ${targetShift.pickupTime} (${releaseTime || "Full"})`,
+      }, currentUser);
     }
     setStaffActionModal(null);
     setExtendReleaseTime("");
@@ -5380,18 +5400,16 @@ export const ProgramDisplay: React.FC<Props> = ({
             </div>
             
             <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
-              <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
-                <p className="text-xs font-semibold text-slate-500 leading-relaxed">
-                  These settings are linked to the program period: 
-                  <span className="block font-black text-indigo-600 mt-1 text-sm">{startDate} to {endDate}</span>
-                </p>
-              </div>
-
               {/* Signatures Section */}
               <div className="space-y-4">
-                <h4 className="font-black uppercase tracking-wider text-xs text-slate-400 border-b border-slate-100 pb-2">
-                  Signatures (Staff Excel)
-                </h4>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h4 className="font-black uppercase tracking-wider text-xs text-indigo-600">
+                    Signatures (Staff Excel) — Linked to Active Program
+                  </h4>
+                  <span className="text-[11px] font-black text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg">
+                    {startDate} to {endDate}
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col">
                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Prepared By</label>
@@ -5415,8 +5433,13 @@ export const ProgramDisplay: React.FC<Props> = ({
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400 leading-normal">
-                  These names will be printed at the bottom of the exported Staff Excel sheet for this specific period.
+                  These signature names are strictly saved for this specific program period ({startDate} to {endDate}) and printed at the bottom of the exported Staff Excel sheet.
                 </p>
+              </div>
+
+              {/* Global Settings Notice */}
+              <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between text-xs text-slate-600 font-bold">
+                <span>🌐 System Settings (Synced across all devices & users)</span>
               </div>
 
               {/* Day-Off Rest Section */}
