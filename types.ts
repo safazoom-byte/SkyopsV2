@@ -115,6 +115,8 @@ export interface Assignment {
   releaseTime?: string;
   initialShiftId?: string;
   customStartTime?: string;
+  customStartDateOffset?: number; // -1 = prev day, 0 = same day (default), +1 = next day
+  releaseDateOffset?: number;     // -1 = prev day, 0 = same day (default), +1 = next day
 }
 
 export interface OffDutyRecord {
