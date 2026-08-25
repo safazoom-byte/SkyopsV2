@@ -4397,11 +4397,26 @@ export const ProgramDisplay: React.FC<Props> = ({
                                               ? "bg-emerald-100 text-emerald-800 border-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.5)]"
                                               : colorClassBase;
                                             
+                                            // Determine if this is the last shift of the day for this staff member
+                                            const isTheirLastShift = !shiftsToday
+                                              .slice(idx + 1)
+                                              .some((futureShift) =>
+                                                prog.assignments.some(
+                                                  (ass) => ass.shiftId === futureShift.id && ass.staffId === st.id,
+                                                ),
+                                              );
+
                                             let extText = st.initials;
                                             if (a.customStartTime && a.releaseTime) {
-                                              extText = `${st.initials}(From ${a.customStartTime}) (till ${a.releaseTime})`;
+                                              if (isTheirLastShift) {
+                                                extText = `${st.initials} FROM ${a.customStartTime} TILL ${a.releaseTime}`;
+                                              } else {
+                                                extText = `${st.initials} FROM ${a.customStartTime}`;
+                                              }
                                             } else if (a.customStartTime) {
-                                              extText = `${st.initials}(From ${a.customStartTime})`;
+                                              extText = `${st.initials} FROM ${a.customStartTime}`;
+                                            } else if (a.releaseTime && isTheirLastShift) {
+                                              extText = `${st.initials} TILL ${a.releaseTime}`;
                                             } else if (a.releaseTime) {
                                               extText = `${st.initials} (till ${a.releaseTime})`;
                                             }
@@ -5213,8 +5228,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Custom Start Duty Time</label>
                       <div className="flex gap-2">
                         <input
-                          type="text"
-                          placeholder="HH:MM e.g. 22:00"
+                          type="time"
                           className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
                           defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.customStartTime || ""}
                           onBlur={(e) => {
@@ -5260,8 +5274,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Release / End Duty Time</label>
                       <div className="flex gap-2">
                         <input
-                          type="text"
-                          placeholder="HH:MM e.g. 06:30"
+                          type="time"
                           className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-400/20"
                           defaultValue={programs[progIdx].assignments.find(a => a.staffId === staffActionModal.staffId && a.shiftId === staffActionModal.currentShiftId)?.releaseTime || ""}
                           onBlur={(e) => {
