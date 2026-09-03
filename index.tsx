@@ -448,14 +448,64 @@ const App: React.FC = () => {
 
   useEffect(() => {
     let channel: any = null;
+    let unsubscribeSync: (() => void) | null = null;
+
     if (supabase && cloudStatus === "connected") {
-       channel = supabase.channel('schema-db-changes')
+      // High-speed multi-device broadcast sync
+      unsubscribeSync = db.onSyncEvent(async (payload) => {
+        // If an event is designated for a specific airport, ensure it matches the current active airport
+        if (
+          payload.airportId &&
+          userProfile?.airport_id &&
+          payload.airportId !== userProfile.airport_id
+        ) {
+          return;
+        }
+
+        if (
+          (payload.action === "ROSTER_UPDATED" || payload.action === "PROGRAMS_UPDATED") &&
+          payload.programs &&
+          payload.programs.length > 0
+        ) {
+          const incomingProgs = payload.programs;
+          setPrograms((prev) => {
+            const newProgs = [...prev];
+            incomingProgs.forEach((incomingProg: DailyProgram) => {
+              const idx = newProgs.findIndex((p) => p.dateString === incomingProg.dateString);
+              if (idx !== -1) {
+                newProgs[idx] = incomingProg;
+              } else {
+                newProgs.push(incomingProg);
+              }
+            });
+            const sorted = newProgs.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+            programsRef.current = sorted;
+            return sorted;
+          });
+          setNotification("Roster updated simultaneously from another device");
+        } else if (
+          payload.action === "FLIGHTS_UPDATED" ||
+          payload.action === "STAFF_UPDATED" ||
+          payload.action === "SHIFTS_UPDATED" ||
+          payload.action === "LEAVES_UPDATED" ||
+          payload.action === "INCOMING_DUTIES_UPDATED" ||
+          payload.action === "DATA_SYNC_REQUIRED"
+        ) {
+          await syncCloudData();
+          setNotification("Data refreshed from another device");
+        }
+      });
+
+      channel = supabase.channel('schema-db-changes')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'programs' },
           (payload) => {
              if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
                const p = payload.new;
+               if (p.airport_id && userProfile?.airport_id && p.airport_id !== userProfile.airport_id) {
+                 return;
+               }
                let notes = {};
                let shiftDrivers = {};
                let actualOffDuty: any[] = [];
@@ -482,7 +532,6 @@ const App: React.FC = () => {
                   const idx = newProgs.findIndex(prog => prog.dateString === mappedProg.dateString);
                   
                   if (idx !== -1) {
-                    // Check if anything actually changed to avoid unnecessary re-renders
                     if (JSON.stringify(newProgs[idx]) === JSON.stringify(mappedProg)) {
                       return prev;
                     }
@@ -502,11 +551,14 @@ const App: React.FC = () => {
         .subscribe();
     }
     return () => {
+      if (unsubscribeSync) {
+        unsubscribeSync();
+      }
       if (channel && supabase) {
         supabase.removeChannel(channel);
       }
     };
-  }, [supabase, cloudStatus]);
+  }, [supabase, cloudStatus, userProfile?.airport_id, userProfile?.role, syncCloudData]);
 
   const confirmGenerateProgram = async (
     manualAssignments: ManualAssignment[] = [],
@@ -593,7 +645,7 @@ const App: React.FC = () => {
         let versions: ProgramVersion[] = [];
         if (supabase) {
           try {
-             versions = await db.getProgramVersions() || [];
+             versions = (await db.getProgramVersions(userProfile?.airport_id)) || [];
           } catch(e) {}
         }
         
@@ -608,17 +660,24 @@ const App: React.FC = () => {
           stationHealth,
           isAutoSave: true,
         };
-        let updatedVersions = [newVersion, ...versions];
-        const versionsToDelete = updatedVersions.slice(10);
-        
-        if (updatedVersions.length > 10) {
-          updatedVersions = updatedVersions.slice(0, 10);
-        }
+
+        // Only prune older AUTO-SAVES; never delete user-created manual versions!
+        const autoSaves = versions.filter((v) => v.isAutoSave);
+        const autoSavesToDelete = autoSaves.slice(4); // Keep latest 4 auto-saves
         
         if (supabase) {
-          await db.saveProgramVersion(newVersion);
-          for (const old of versionsToDelete) {
+          await db.saveProgramVersion(newVersion, userProfile?.airport_id);
+          db.broadcastSync({
+            action: "VERSION_SAVED",
+            version: newVersion,
+            airportId: userProfile?.airport_id,
+          });
+          for (const old of autoSavesToDelete) {
             await db.deleteProgramVersion(old.id);
+            db.broadcastSync({
+              action: "VERSION_DELETED",
+              versionId: old.id,
+            });
           }
         }
       }
@@ -630,12 +689,20 @@ const App: React.FC = () => {
            if (idx !== -1) merged[idx] = newP;
            else merged.push(newP);
         });
-        return merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+        const sorted = merged.sort((a, b) => (a.dateString || "").localeCompare(b.dateString || ""));
+        programsRef.current = sorted;
+        return sorted;
       });
       setStationHealth(result.stationHealth);
       setAlerts(result.alerts || []);
       if (supabase) {
         await db.savePrograms(result.programs);
+        db.broadcastSync({
+          action: "ROSTER_UPDATED",
+          programs: result.programs,
+          dateStrings: result.programs.map((p: any) => p.dateString),
+          airportId: userProfile?.airport_id,
+        });
         await db.logAction(
           "GENERATE_AI",
           "PROGRAM",
@@ -2573,6 +2640,12 @@ const App: React.FC = () => {
               if (supabase && changedPrograms.length > 0) {
                 try {
                   await db.savePrograms(changedPrograms);
+                  db.broadcastSync({
+                    action: "ROSTER_UPDATED",
+                    programs: changedPrograms,
+                    dateStrings: changedDateStrings || (changedPrograms.map(p => p.dateString).filter(Boolean) as string[]),
+                    airportId: userProfile?.airport_id,
+                  });
                 } catch (err) {
                   console.error("Failed to save programs to database, rolling back.", err);
                   // Rollback state & ref
@@ -2601,6 +2674,11 @@ const App: React.FC = () => {
               if (supabase) {
                 try {
                   await db.savePrograms(v.programs);
+                  db.broadcastSync({
+                    action: "ROSTER_UPDATED",
+                    programs: v.programs,
+                    airportId: userProfile?.airport_id,
+                  });
                 } catch (err) {
                   console.error("Failed to save restored version:", err);
                   programsRef.current = oldPrograms;
@@ -2616,6 +2694,10 @@ const App: React.FC = () => {
               if (supabase) {
                 try {
                   await db.upsertLeaves(l);
+                  db.broadcastSync({
+                    action: "DATA_SYNC_REQUIRED",
+                    airportId: userProfile?.airport_id,
+                  });
                 } catch (err) {
                   console.error("Failed to save leave requests, rolling back.", err);
                   leaveRequestsRef.current = oldLeaves;

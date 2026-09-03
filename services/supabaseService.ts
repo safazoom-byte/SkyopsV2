@@ -153,28 +153,108 @@ let saveProgramsQueue: Promise<void> | null = null;
 let cachedProfile: UserProfile | null = null;
 let profileFetchTime = 0;
 
+// Multi-device synchronization
+const DEVICE_ID =
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+let syncChannel: any = null;
+
+export interface DeviceSyncPayload {
+  action: string;
+  senderId: string;
+  airportId?: string | null;
+  version?: ProgramVersion;
+  versionId?: string;
+  dateStrings?: string[];
+  programs?: DailyProgram[];
+  timestamp: number;
+}
+
+type SyncCallback = (event: DeviceSyncPayload) => void;
+const syncListeners = new Set<SyncCallback>();
+
+export const initRealtimeSync = () => {
+  if (!supabase || syncChannel) return;
+  try {
+    syncChannel = supabase.channel("skyops_multi_device_sync", {
+      config: {
+        broadcast: { self: false },
+      },
+    });
+
+    syncChannel.on("broadcast", { event: "device_sync" }, ({ payload }: { payload: any }) => {
+      if (!payload || payload.senderId === DEVICE_ID) return;
+      syncListeners.forEach((listener) => {
+        try {
+          listener(payload);
+        } catch (e) {
+          console.warn("Sync listener error:", e);
+        }
+      });
+    });
+
+    syncChannel.subscribe((status: string) => {
+      if (status === "SUBSCRIBED") {
+        console.log("Realtime multi-device sync active.");
+      }
+    });
+  } catch (err) {
+    console.warn("Failed to initialize realtime sync channel:", err);
+  }
+};
+
 export const db = {
   clearProfileCache() {
     cachedProfile = null;
     profileFetchTime = 0;
   },
 
-  async getMutationContext() {
+  broadcastSync(event: Omit<DeviceSyncPayload, "senderId" | "timestamp">) {
+    if (!supabase) return;
+    if (!syncChannel) initRealtimeSync();
+    if (syncChannel) {
+      const payload: DeviceSyncPayload = {
+        ...event,
+        senderId: DEVICE_ID,
+        timestamp: Date.now(),
+      };
+      syncChannel
+        .send({
+          type: "broadcast",
+          event: "device_sync",
+          payload,
+        })
+        .catch((e: any) => console.warn("Broadcast error:", e));
+    }
+  },
+
+  onSyncEvent(callback: SyncCallback) {
+    initRealtimeSync();
+    syncListeners.add(callback);
+    return () => {
+      syncListeners.delete(callback);
+    };
+  },
+
+  async getMutationContext(airportIdOverride?: string) {
     const session = await auth.getSession();
     if (!session) return null;
     const profile = await this.getUserProfile();
-    
-    // Super admin must have an airport selected to mutate data
-    if (profile?.role === 'super_admin' && !profile?.airport_id) {
-       return null;
+
+    const airportId = airportIdOverride || profile?.airport_id || null;
+    // Super admin must have an airport selected to mutate data unless override is given
+    if (profile?.role === "super_admin" && !airportId) {
+      return null;
     }
 
     return {
       userId: session.user.id,
-      airportId: profile?.airport_id || null,
-      matchCol: profile?.airport_id ? "airport_id" : "user_id",
-      matchVal: profile?.airport_id ? profile.airport_id : session.user.id,
-      role: profile?.role
+      airportId: airportId,
+      matchCol: airportId ? "airport_id" : "user_id",
+      matchVal: airportId ? airportId : session.user.id,
+      role: profile?.role,
     };
   },
 
@@ -398,6 +478,7 @@ export const db = {
           day: f.day,
         }))
       );
+      this.broadcastSync({ action: "FLIGHTS_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert flights:", e);
     }
@@ -424,6 +505,7 @@ export const db = {
         flight_type: f.type,
         day: f.day,
       });
+      this.broadcastSync({ action: "FLIGHTS_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert flight:", e);
     }
@@ -472,6 +554,7 @@ export const db = {
           },
         }))
       );
+      this.broadcastSync({ action: "STAFF_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert staff batch:", e);
     }
@@ -518,6 +601,7 @@ export const db = {
             staffId: s.staffId,
         },
       });
+      this.broadcastSync({ action: "STAFF_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert staff:", e);
     }
@@ -553,6 +637,7 @@ export const db = {
           };
         })
       );
+      this.broadcastSync({ action: "SHIFTS_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert shifts batch:", e);
     }
@@ -584,6 +669,7 @@ export const db = {
         role_counts: rc,
         flight_ids: s.flightIds || [],
       });
+      this.broadcastSync({ action: "SHIFTS_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert shift:", e);
     }
@@ -604,6 +690,7 @@ export const db = {
         end_date: l.endDate,
         leave_type: l.type,
       });
+      this.broadcastSync({ action: "LEAVES_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert leave:", e);
     }
@@ -626,6 +713,7 @@ export const db = {
           leave_type: l.type,
         })),
       );
+      this.broadcastSync({ action: "LEAVES_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert leaves:", e);
     }
@@ -645,6 +733,7 @@ export const db = {
         date: d.date,
         shift_end_time: d.shiftEndTime,
       });
+      this.broadcastSync({ action: "INCOMING_DUTIES_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert incoming duty:", e);
     }
@@ -666,6 +755,7 @@ export const db = {
           shift_end_time: d.shiftEndTime,
         })),
       );
+      this.broadcastSync({ action: "INCOMING_DUTIES_UPDATED", airportId: ctx.airportId });
     } catch (e) {
       console.warn("Failed to upsert incoming duties:", e);
     }
@@ -678,7 +768,9 @@ export const db = {
       const ctx = await this.getMutationContext();
       if (!ctx) return;
 
-      const datesToOverwrite = programs.map((p) => p.dateString).filter(Boolean);
+      const datesToOverwrite: string[] = programs
+        .map((p) => p.dateString)
+        .filter((d): d is string => Boolean(d));
 
       try {
         // Query ALL rows for these dates belonging to the current scope (airport_id or user_id) to find any duplicate/stale records
@@ -763,16 +855,23 @@ export const db = {
           })
         );
         if (insError) {
-           console.warn("Failed to upsert programs:", insError);
+          console.warn("Failed to upsert programs:", insError);
+        } else {
+          this.broadcastSync({
+            action: "PROGRAMS_UPDATED",
+            airportId: ctx.airportId,
+            dateStrings: datesToOverwrite,
+            programs,
+          });
         }
       } catch (e) {
         console.warn("Failed to save programs:", e);
       }
     };
     if (saveProgramsQueue) {
-       saveProgramsQueue = saveProgramsQueue.then(() => execute()).catch(() => execute());
+      saveProgramsQueue = saveProgramsQueue.then(() => execute()).catch(() => execute());
     } else {
-       saveProgramsQueue = execute();
+      saveProgramsQueue = execute();
     }
     await saveProgramsQueue;
   },
@@ -783,6 +882,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("flights").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "FLIGHTS_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete flight:", e);
       }
@@ -794,6 +894,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("staff").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "STAFF_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete staff:", e);
       }
@@ -806,6 +907,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("staff").delete().eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "STAFF_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete all staff:", e);
       }
@@ -817,6 +919,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("shifts").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "SHIFTS_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete shift:", e);
       }
@@ -828,6 +931,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("leave_requests").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "LEAVES_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete leave:", e);
       }
@@ -839,6 +943,7 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("incoming_duties").delete().eq("id", id).eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "INCOMING_DUTIES_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete incoming duty:", e);
       }
@@ -851,83 +956,117 @@ export const db = {
     if (client && ctx) {
       try {
         await client.from("incoming_duties").delete().eq(ctx.matchCol, ctx.matchVal);
+        this.broadcastSync({ action: "INCOMING_DUTIES_UPDATED", airportId: ctx.airportId });
       } catch (e) {
         console.warn("Failed to delete all incoming duties:", e);
       }
     }
   },
 
-  async saveProgramVersion(v: ProgramVersion) {
+  async saveProgramVersion(v: ProgramVersion, airportIdOverride?: string): Promise<{ success: boolean; error?: any }> {
     const client = supabase;
-    if (!client) return;
-    const ctx = await this.getMutationContext();
-    if (!ctx) return;
+    if (!client) return { success: false, error: new Error("Supabase client not initialized") };
+    const ctx = await this.getMutationContext(airportIdOverride);
+    if (!ctx) return { success: false, error: new Error("No active session or context") };
     try {
+      const targetAirportId = airportIdOverride || ctx.airportId;
       const { error } = await client.from("program_versions").upsert({
         id: v.id,
         user_id: ctx.userId,
-        airport_id: ctx.airportId,
+        airport_id: targetAirportId,
         version_number: v.versionNumber,
         name: v.name,
         created_at: v.createdAt,
         period_start: v.periodStart,
         period_end: v.periodEnd,
         programs: v.programs,
-        station_health: v.stationHealth,
+        station_health: typeof v.stationHealth === "number"
+          ? Math.round(v.stationHealth)
+          : typeof (v.stationHealth as any)?.overallScore === "number"
+          ? Math.round((v.stationHealth as any).overallScore)
+          : 100,
         is_auto_save: v.isAutoSave || false,
       });
       if (error) {
-         console.warn("Failed to save program version:", error);
+        console.error("Failed to save program version:", error);
+        return { success: false, error };
       }
+      this.broadcastSync({
+        action: "VERSION_SAVED",
+        airportId: targetAirportId,
+        version: { ...v, airportId: targetAirportId || undefined, userId: ctx.userId },
+      });
+      return { success: true };
     } catch (e) {
-      console.warn("Failed to save program version:", e);
+      console.error("Failed to save program version:", e);
+      return { success: false, error: e };
     }
   },
 
-  async getProgramVersions(): Promise<ProgramVersion[]> {
+  async getProgramVersions(airportIdOverride?: string): Promise<ProgramVersion[]> {
     const client = supabase;
     if (!client) return [];
     
-    // For reads, we can use the regular context or fallback if super admin
-    const profile = await this.getUserProfile();
-    let query = client.from("program_versions").select("*").order("created_at", { ascending: false }).limit(50);
-    
-    if (profile?.role === "super_admin" && !profile?.airport_id) {
-       // Global view: no filters
-    } else {
-       const ctx = await this.getMutationContext();
-       if (!ctx) return [];
-       query = query.eq(ctx.matchCol, ctx.matchVal);
-    }
+    try {
+      const profile = await this.getUserProfile();
+      let query = client.from("program_versions").select("*").order("created_at", { ascending: false }).limit(50);
+      
+      const effectiveAirportId = airportIdOverride || profile?.airport_id;
+      if (profile?.role === "super_admin" && !effectiveAirportId) {
+        // Global view: no filter
+      } else if (effectiveAirportId) {
+        query = query.or(`airport_id.eq.${effectiveAirportId},airport_id.is.null`);
+      } else {
+        const session = await auth.getSession();
+        if (session?.user?.id) {
+          query = query.eq("user_id", session.user.id);
+        }
+      }
 
-    const { data } = await query;
-    if (!data) return [];
-    return data.map((v: any) => ({
-      id: v.id,
-      versionNumber: v.version_number,
-      name: v.name,
-      createdAt: v.created_at,
-      periodStart: v.period_start,
-      periodEnd: v.period_end,
-      programs: v.programs,
-      stationHealth: v.station_health,
-      isAutoSave: v.is_auto_save,
-    }));
+      const { data, error } = await query;
+      if (error) {
+        console.warn("Failed to get program versions:", error);
+        return [];
+      }
+      if (!data) return [];
+      return data.map((v: any) => ({
+        id: v.id,
+        versionNumber: v.version_number,
+        name: v.name,
+        createdAt: v.created_at,
+        periodStart: v.period_start,
+        periodEnd: v.period_end,
+        programs: v.programs,
+        stationHealth: typeof v.station_health === "number"
+          ? v.station_health
+          : typeof v.station_health?.overallScore === "number"
+          ? v.station_health.overallScore
+          : 100,
+        isAutoSave: v.is_auto_save,
+      }));
+    } catch (e) {
+      console.warn("Failed to get program versions:", e);
+      return [];
+    }
   },
 
-  async deleteProgramVersion(id: string) {
+  async deleteProgramVersion(id: string): Promise<{ success: boolean; error?: any }> {
     const client = supabase;
-    const ctx = await this.getMutationContext();
-    if (client && ctx) {
-      try {
-        await client
-          .from("program_versions")
-          .delete()
-          .eq("id", id)
-          .eq(ctx.matchCol, ctx.matchVal);
-      } catch (e) {
-        console.warn("Failed to delete program version:", e);
+    if (!client) return { success: false, error: new Error("No client") };
+    try {
+      const { error } = await client
+        .from("program_versions")
+        .delete()
+        .eq("id", id);
+      if (error) {
+        console.warn("Failed to delete program version:", error);
+        return { success: false, error };
       }
+      this.broadcastSync({ action: "VERSION_DELETED", versionId: id });
+      return { success: true };
+    } catch (e) {
+      console.warn("Failed to delete program version:", e);
+      return { success: false, error: e };
     }
   },
 

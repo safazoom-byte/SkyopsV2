@@ -430,7 +430,7 @@ export const ProgramDisplay: React.FC<Props> = ({
       let allVersions: ProgramVersion[] = [];
       
       if (supabase) {
-        const dbVersions = await db.getProgramVersions();
+        const dbVersions = await db.getProgramVersions(currentUser?.airport_id);
         if (dbVersions.length > 0) {
           allVersions = dbVersions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         }
@@ -441,7 +441,31 @@ export const ProgramDisplay: React.FC<Props> = ({
       }
     };
     loadVersions();
-  }, []);
+  }, [currentUser?.airport_id]);
+
+  useEffect(() => {
+    const unsubscribe = db.onSyncEvent((payload) => {
+      if (payload.action === "VERSION_SAVED" && payload.version) {
+        // If the version is tagged with a different airport, do not display in the current airport's time machine
+        if (
+          payload.airportId &&
+          currentUser?.airport_id &&
+          payload.airportId !== currentUser.airport_id
+        ) {
+          return;
+        }
+        setVersions((prev) => {
+          if (prev.some((v) => v.id === payload.version!.id)) return prev;
+          return [payload.version!, ...prev].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        });
+      } else if (payload.action === "VERSION_DELETED" && payload.versionId) {
+        setVersions((prev) => prev.filter((v) => v.id !== payload.versionId));
+      }
+    });
+    return unsubscribe;
+  }, [currentUser?.airport_id]);
 
   const saveVersion = () => {
     setVersionNameModal({ open: true, name: `Version ${versions.length + 1}` });
@@ -463,14 +487,40 @@ export const ProgramDisplay: React.FC<Props> = ({
       isAutoSave: false,
     };
 
-    let updatedVersions = [newVersion, ...versions];
-    const versionsToDelete = updatedVersions.slice(10);
-    if (updatedVersions.length > 10) updatedVersions = updatedVersions.slice(0, 10);
+    // Separate manual versions from auto-saves so manual versions are never accidentally pruned
+    const currentManual = versions.filter((v) => !v.isAutoSave);
+    const currentAuto = versions.filter((v) => v.isAutoSave);
+
+    let updatedManual = [newVersion, ...currentManual];
+    let manualToDelete: ProgramVersion[] = [];
+    if (updatedManual.length > 30) {
+      manualToDelete = updatedManual.slice(30);
+      updatedManual = updatedManual.slice(0, 30);
+    }
+    const updatedVersions = [...updatedManual, ...currentAuto].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
     setVersions(updatedVersions);
 
     if (supabase) {
-      await db.saveProgramVersion(newVersion);
-      for (const old of versionsToDelete) await db.deleteProgramVersion(old.id);
+      const res = await db.saveProgramVersion(newVersion, currentUser?.airport_id);
+      if (!res.success) {
+        console.error("Failed to save program version:", res.error);
+        alert("Warning: Could not save version to database. " + (res.error?.message || "Please check your network."));
+      } else {
+        db.broadcastSync({
+          action: "VERSION_SAVED",
+          version: newVersion,
+          airportId: currentUser?.airport_id,
+        });
+        for (const old of manualToDelete) {
+          await db.deleteProgramVersion(old.id);
+          db.broadcastSync({
+            action: "VERSION_DELETED",
+            versionId: old.id,
+          });
+        }
+      }
     }
   };
 
@@ -480,6 +530,10 @@ export const ProgramDisplay: React.FC<Props> = ({
     setVersions(updated);
     if (supabase) {
       await db.deleteProgramVersion(id);
+      db.broadcastSync({
+        action: "VERSION_DELETED",
+        versionId: id,
+      });
     }
   };
 

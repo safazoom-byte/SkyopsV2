@@ -226,6 +226,9 @@ export interface ProgramVersion {
   programs: DailyProgram[];
   stationHealth: number;
   isAutoSave?: boolean;
+  airportId?: string;
+  airport_id?: string;
+  userId?: string;
 }
 
 export interface ManualAssignment {
