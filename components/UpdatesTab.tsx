@@ -102,11 +102,12 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
   const PAGE_SIZE = 50;
 
   // Filters
+  const [dateScope, setDateScope] = useState<"PERIOD" | "ALL">("PERIOD");
   const [selectedStaffId, setSelectedStaffId] = useState<string>("ALL");
   const [selectedChangeType, setSelectedChangeType] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // Load updates for the active program period (startDate to endDate)
+  // Load updates from persistent DB (scoped to period or full station history)
   const loadUpdates = useCallback(
     async (reset = false) => {
       if (reset) {
@@ -118,8 +119,8 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
 
       const offset = reset ? 0 : pageOffset;
       const res = await db.fetchRosterUpdates({
-        startDate: startDate,
-        endDate: endDate,
+        startDate: dateScope === "PERIOD" ? startDate : undefined,
+        endDate: dateScope === "PERIOD" ? endDate : undefined,
         staffId: selectedStaffId === "ALL" ? undefined : selectedStaffId,
         changeType: selectedChangeType === "ALL" ? undefined : selectedChangeType,
         limit: PAGE_SIZE,
@@ -139,19 +140,19 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
       setLoading(false);
       setLoadingMore(false);
     },
-    [startDate, endDate, selectedStaffId, selectedChangeType, pageOffset]
+    [startDate, endDate, dateScope, selectedStaffId, selectedChangeType, pageOffset]
   );
 
   // Reload whenever current program dates or filters change
   useEffect(() => {
     loadUpdates(true);
-  }, [startDate, endDate, selectedStaffId, selectedChangeType]);
+  }, [startDate, endDate, dateScope, selectedStaffId, selectedChangeType]);
 
   // Real-time updates subscription
   useEffect(() => {
     const unsubscribe = db.subscribeRosterUpdates((newEntry) => {
-      // Bounded strictly to current program period
-      if (startDate && endDate && newEntry.affected_date) {
+      // If scoped to current period, check dates
+      if (dateScope === "PERIOD" && startDate && endDate && newEntry.affected_date) {
         if (newEntry.affected_date < startDate || newEntry.affected_date > endDate) {
           return;
         }
@@ -174,7 +175,7 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [startDate, endDate, selectedStaffId, selectedChangeType]);
+  }, [startDate, endDate, dateScope, selectedStaffId, selectedChangeType]);
 
   // Filtered in-memory by search query
   const filteredUpdates = useMemo(() => {
@@ -342,11 +343,41 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
         <div className="bg-white border border-slate-200/90 rounded-2xl p-3 md:p-4 shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           {/* Left filters & Program Period Badge */}
           <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* Active Program Period Badge */}
-            <div className="flex items-center gap-2 px-3.5 py-2 bg-indigo-50 border border-indigo-200/80 rounded-xl text-xs font-bold text-indigo-950 shrink-0">
-              <Calendar size={14} className="text-indigo-600 shrink-0" />
-              <span>Program: {periodDisplayLabel}</span>
+            {/* Scope Toggle: Active Period vs All Dates */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl shrink-0 border border-slate-200/60">
+              <button
+                type="button"
+                id="scope-btn-period"
+                onClick={() => setDateScope("PERIOD")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  dateScope === "PERIOD"
+                    ? "bg-white text-indigo-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                Current Week
+              </button>
+              <button
+                type="button"
+                id="scope-btn-all"
+                onClick={() => setDateScope("ALL")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  dateScope === "ALL"
+                    ? "bg-white text-indigo-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                All History
+              </button>
             </div>
+
+            {/* Active Program Period Badge */}
+            {dateScope === "PERIOD" && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200/80 rounded-xl text-xs font-bold text-indigo-950 shrink-0">
+                <Calendar size={14} className="text-indigo-600 shrink-0" />
+                <span>{periodDisplayLabel}</span>
+              </div>
+            )}
 
             {/* Staff Search */}
             <div className="relative min-w-[200px] flex-1">
@@ -420,7 +451,9 @@ export const UpdatesTab: React.FC<UpdatesTabProps> = ({
         <div className="mt-2 px-2 flex items-center justify-between text-[11px] font-bold text-slate-500">
           <div className="flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Scope: Active Program Period ({periodDisplayLabel})</span>
+            <span>
+              Scope: {dateScope === "PERIOD" ? `Active Program Period (${periodDisplayLabel})` : "All Station Roster History"}
+            </span>
           </div>
           {filteredUpdates.length > 0 && (
             <span>

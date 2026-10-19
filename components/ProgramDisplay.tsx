@@ -5028,9 +5028,22 @@ export const ProgramDisplay: React.FC<Props> = ({
           });
           newPrograms[progIdx] = newProg;
           onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
+
+          logRosterUpdate({
+            change_type: "STAFF_ADDED",
+            staff_id: staffId,
+            staff_name: staffObj?.name,
+            staff_initials: staffObj?.initials,
+            affected_date: programs[progIdx].dateString,
+            to_shift_id: shift.id,
+            to_shift_name: `Shift at ${shift.pickupTime || ""}`,
+            from_value: "None",
+            to_value: `Shift at ${shift.pickupTime || ""}`,
+          }, currentUser);
         };
 
         const removeStaff = (staffId: string) => {
+          const staffObj = activeStaff.find(s => s.id === staffId);
           const newPrograms = [...programs];
           const newProg = { ...newPrograms[progIdx] };
           newProg.assignments = newProg.assignments.filter(
@@ -5038,6 +5051,18 @@ export const ProgramDisplay: React.FC<Props> = ({
           );
           newPrograms[progIdx] = newProg;
           onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
+
+          logRosterUpdate({
+            change_type: "STAFF_REMOVED",
+            staff_id: staffId,
+            staff_name: staffObj?.name,
+            staff_initials: staffObj?.initials,
+            affected_date: programs[progIdx].dateString,
+            from_shift_id: shift.id,
+            from_shift_name: `Shift at ${shift.pickupTime || ""}`,
+            from_value: `Shift at ${shift.pickupTime || ""}`,
+            to_value: "Removed",
+          }, currentUser);
         };
 
         const handleSaveBulkEdit = () => {
@@ -5082,6 +5107,18 @@ export const ProgramDisplay: React.FC<Props> = ({
 
           newPrograms[progIdx] = newProg;
           onUpdatePrograms(newPrograms, [programs[progIdx].dateString as string]);
+
+          logRosterUpdate({
+            change_type: "SHIFT_CHANGE",
+            affected_date: programs[progIdx].dateString,
+            from_shift_id: shift.id,
+            to_shift_id: shift.id,
+            from_shift_name: `Shift at ${shift.pickupTime || ""}`,
+            to_shift_name: `Shift at ${shift.pickupTime || ""}`,
+            from_value: "Previous roster",
+            to_value: `Bulk updated: ${initialsArray.join(", ")}`,
+          }, currentUser);
+
           setIsShiftBulkEditMode(false);
           setShiftBulkEditText("");
         };

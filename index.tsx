@@ -97,6 +97,7 @@ import {
   Check,
   Award,
   Menu,
+  RefreshCw,
 } from "lucide-react";
 import "./style.css";
 
@@ -381,13 +382,40 @@ const App: React.FC = () => {
       try {
         const s = await auth.getSession(6000);
         if (mounted) {
-          setSession(s);
           if (s) {
-            db.getUserProfile().then((profile) => {
-              if (mounted) setUserProfile(profile);
-            });
+            // Verify with server whether user still exists in auth
+            const { data: userData, error: userError } = await supabase.auth.getUser();
+            if (userError || !userData?.user) {
+              await auth.signOut().catch(() => {});
+              if (mounted) {
+                setSession(null);
+                setUserProfile(null);
+                setCloudStatus("unconfigured");
+                setCloudError("Your account has been deleted by an administrator.");
+                setIsInitializing(false);
+              }
+              return;
+            }
+
+            const profile = await db.getUserProfile(true);
+            if (!profile) {
+              await auth.signOut().catch(() => {});
+              if (mounted) {
+                setSession(null);
+                setUserProfile(null);
+                setCloudStatus("unconfigured");
+                setCloudError("Your account has been removed by an administrator.");
+                setIsInitializing(false);
+              }
+              return;
+            }
+
+            setSession(s);
+            setUserProfile(profile);
             syncCloudData(); // Run in background without blocking initialization
           } else {
+            setSession(null);
+            setUserProfile(null);
             setCloudStatus("unconfigured"); // Default to unconfigured instead of offline if logged out
           }
           setIsInitializing(false);
@@ -411,13 +439,23 @@ const App: React.FC = () => {
       unsubscribe = auth.onAuthStateChange(async (event, s) => {
         if (event === "INITIAL_SESSION") return; // Handled by checkAuth
         if (mounted) {
-          setSession(s);
           if (s) {
-            db.getUserProfile().then((profile) => {
-              if (mounted) setUserProfile(profile);
-            });
+            const profile = await db.getUserProfile(true);
+            if (!profile) {
+              await auth.signOut().catch(() => {});
+              if (mounted) {
+                setSession(null);
+                setUserProfile(null);
+                setCloudStatus("unconfigured");
+                setCloudError("Your account has been removed by an administrator.");
+              }
+              return;
+            }
+            setSession(s);
+            setUserProfile(profile);
             syncCloudData();
           } else {
+            setSession(null);
             setUserProfile(null);
             setCloudStatus("unconfigured");
           }
@@ -462,6 +500,21 @@ const App: React.FC = () => {
           return;
         }
 
+        if (payload.action === "USER_DELETED" && payload.userId === session?.user?.id) {
+          await auth.signOut().catch(() => {});
+          setSession(null);
+          setUserProfile(null);
+          setCloudError("Your account has been deleted by an administrator.");
+          return;
+        }
+        if (payload.action === "USER_UPDATED" && payload.userId === session?.user?.id) {
+          const fresh = await db.getUserProfile(true);
+          if (fresh) {
+            setUserProfile(fresh);
+          }
+          return;
+        }
+
         if (
           (payload.action === "ROSTER_UPDATED" || payload.action === "PROGRAMS_UPDATED") &&
           payload.programs &&
@@ -497,6 +550,25 @@ const App: React.FC = () => {
       });
 
       channel = supabase.channel('schema-db-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_profiles' },
+          async (payload) => {
+            const currentUserId = session?.user?.id;
+            if (!currentUserId) return;
+            if (payload.eventType === 'DELETE' && payload.old && (payload.old as any).id === currentUserId) {
+              await auth.signOut().catch(() => {});
+              setSession(null);
+              setUserProfile(null);
+              setCloudError("Your account has been deleted by an administrator.");
+            } else if ((payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') && payload.new && (payload.new as any).id === currentUserId) {
+              const fresh = await db.getUserProfile(true);
+              if (fresh) {
+                setUserProfile(fresh);
+              }
+            }
+          }
+        )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'programs' },
@@ -558,7 +630,7 @@ const App: React.FC = () => {
         supabase.removeChannel(channel);
       }
     };
-  }, [supabase, cloudStatus, userProfile?.airport_id, userProfile?.role, syncCloudData]);
+  }, [supabase, cloudStatus, userProfile?.airport_id, userProfile?.role, syncCloudData, session?.user?.id]);
 
   const confirmGenerateProgram = async (
     manualAssignments: ManualAssignment[] = [],
@@ -1183,6 +1255,70 @@ const App: React.FC = () => {
       </div>
     );
   if (!session && supabase) return <Auth error={cloudError} />;
+
+  if (userProfile && !userProfile.isActive) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 select-none relative overflow-hidden">
+        {/* Ambient glow */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-500/10 blur-[140px] rounded-full pointer-events-none"></div>
+
+        <div className="max-w-md w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 text-center backdrop-blur-xl">
+          <div className="w-20 h-20 mx-auto rounded-3xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-6 shadow-inner">
+            <Lock size={38} className="animate-pulse" />
+          </div>
+
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-[10px] font-black uppercase tracking-widest mb-4">
+            <ShieldAlert size={12} />
+            Account Frozen
+          </div>
+
+          <h2 className="text-2xl font-black text-white tracking-tight mb-2">
+            Access Suspended
+          </h2>
+
+          <p className="text-xs text-slate-400 leading-relaxed mb-6">
+            Your account ({userProfile.email}) has been frozen by the system administrator. You are currently restricted from accessing operational data, schedules, or generating programs.
+          </p>
+
+          <div className="bg-slate-950/60 rounded-2xl p-4 border border-slate-800/80 mb-6 text-left">
+            <div className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Notice</div>
+            <p className="text-xs text-slate-300">
+              Please contact the Master Administrator (<span className="text-blue-400 font-semibold">safazoom@gmail.com</span>) to review or restore your account privileges.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={async () => {
+                const refreshed = await db.getUserProfile(true);
+                if (refreshed) {
+                  setUserProfile(refreshed);
+                  if (refreshed.isActive) {
+                    setNotification("Account is now active!");
+                  }
+                }
+              }}
+              className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 border border-slate-700 cursor-pointer"
+            >
+              <RefreshCw size={14} />
+              Check Status
+            </button>
+            <button
+              onClick={async () => {
+                await auth.signOut();
+                setSession(null);
+                setUserProfile(null);
+              }}
+              className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-rose-900/30 cursor-pointer"
+            >
+              <LogOut size={14} />
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">

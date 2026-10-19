@@ -20,10 +20,12 @@ import {
 } from "../types";
 
 const SUPABASE_URL =
-  import.meta.env.VITE_SUPABASE_URL ||
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_URL) ||
+  (typeof process !== "undefined" && process.env?.VITE_SUPABASE_URL) ||
   "https://hldvxfurkstqhmmktxsz.supabase.co";
 const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  (typeof import.meta !== "undefined" && import.meta.env?.VITE_SUPABASE_ANON_KEY) ||
+  (typeof process !== "undefined" && process.env?.VITE_SUPABASE_ANON_KEY) ||
   "sb_publishable_E9StxaACROyElt3UQ8qVYw_C0zsUQzy";
 
 const isConfigured =
@@ -169,6 +171,8 @@ export interface DeviceSyncPayload {
   versionId?: string;
   dateStrings?: string[];
   programs?: DailyProgram[];
+  userId?: string;
+  isActive?: boolean;
   timestamp: number;
 }
 
@@ -293,6 +297,10 @@ export const db = {
       if (!session) return null;
       
       const profile = await this.getUserProfile();
+      if (profile && !profile.isActive) {
+        console.warn("Account is frozen. Suppressing fetchAll.");
+        return null;
+      }
       const currentAirportId = airportIdOverride !== undefined ? airportIdOverride : profile?.airport_id;
       
       // If super_admin has no airport selected, allow global visibility by fetching all
@@ -1150,49 +1158,45 @@ export const db = {
         console.warn("Could not fetch profile from DB", e);
       }
 
-    // If no profile exists, create a default one
+    // If no profile exists, only allow bootstrap for master super_admin (safazoom@gmail.com)
     if (!profile) {
-      profile = {
-        id: session.user.id,
-        email: session.user.email,
-        role: "planner",
-        aiDailyLimit: 5,
-        aiWeeklyLimit: 20,
-        aiMonthlyLimit: 50,
-        maxStaff: 50,
-        maxShifts: 20,
-        isActive: true,
-        companyLogo: "",
-        skyopsLogo: "",
-        preparedBy: "Operation Control Center",
-        revisedBy: "",
-      };
+      if (session.user.email?.toLowerCase() === "safazoom@gmail.com") {
+        profile = {
+          id: session.user.id,
+          email: session.user.email,
+          role: "super_admin",
+          aiDailyLimit: 9999,
+          aiWeeklyLimit: 9999,
+          aiMonthlyLimit: 9999,
+          maxStaff: 500,
+          maxShifts: 100,
+          isActive: true,
+          companyLogo: "",
+          skyopsLogo: "",
+          preparedBy: "Operation Control Center",
+          revisedBy: "",
+        };
 
-      try {
-        const { error } = await supabase.from("user_profiles").insert({
-          id: profile.id,
-          email: profile.email,
-          role: profile.role,
-          ai_daily_limit: profile.aiDailyLimit,
-          ai_weekly_limit: profile.aiWeeklyLimit,
-          ai_monthly_limit: profile.aiMonthlyLimit,
-          max_staff: profile.maxStaff,
-          max_shifts: profile.maxShifts,
-          is_active: profile.isActive,
-          company_logo: profile.companyLogo,
-          skyops_logo: profile.skyopsLogo,
-          prepared_by: profile.preparedBy,
-          revised_by: profile.revisedBy,
-        });
-        if (error) {
-          if (error.code === '23505') {
-            console.warn("Profile already exists (concurrent insert)");
-          } else {
-            console.warn("Could not insert profile to DB:", JSON.stringify(error));
-          }
+        try {
+          await supabase.from("user_profiles").upsert({
+            id: profile.id,
+            email: profile.email,
+            role: profile.role,
+            ai_daily_limit: profile.aiDailyLimit,
+            ai_weekly_limit: profile.aiWeeklyLimit,
+            ai_monthly_limit: profile.aiMonthlyLimit,
+            max_staff: profile.maxStaff,
+            max_shifts: profile.maxShifts,
+            is_active: true,
+            prepared_by: profile.preparedBy,
+          });
+        } catch (e) {
+          console.warn("Exception during master profile creation:", e);
         }
-      } catch (e) {
-        console.warn("Exception during default profile creation:", e);
+      } else {
+        // User profile does not exist: user was deleted or unauthorized. Return null.
+        cachedProfile = null;
+        return null;
       }
     }
 
@@ -1278,6 +1282,11 @@ export const db = {
         
         cachedProfile = { ...profile };
         profileFetchTime = Date.now();
+        this.broadcastSync({
+          action: "USER_UPDATED",
+          userId: profile.id,
+          isActive: profile.isActive,
+        });
       } catch (e) {
         console.warn("Exception updating profile:", e);
       }
@@ -1310,6 +1319,7 @@ export const db = {
         const errorData = await res.json();
         throw new Error(errorData.error || "Failed to delete user");
       }
+      this.broadcastSync({ action: "USER_DELETED", userId: id });
     } catch (e) {
       console.warn("Could not delete profile via API", e);
     }
@@ -1485,16 +1495,29 @@ export const db = {
         if (data && data.length > 0) {
           const session = await auth.getSession();
           const currentUser = session?.user;
-          return data.map((d: any) => ({
-            id: d.id,
-            userId: d.user_id,
-            userEmail: d.user_email,
-            actionType: d.action_type,
-            entityType: d.entity_type,
-            entityId: d.entity_id,
-            details: d.details,
-            createdAt: d.created_at,
-          }));
+          return data.map((d: any) => {
+            let detailsText = d.details;
+            try {
+              if (d.details && typeof d.details === "string" && d.details.startsWith("{")) {
+                const parsed = JSON.parse(d.details);
+                if (parsed.summary) {
+                  detailsText = parsed.summary;
+                }
+              }
+            } catch {
+              // keep detailsText as is
+            }
+            return {
+              id: d.id,
+              userId: d.user_id,
+              userEmail: d.user_email,
+              actionType: d.action_type,
+              entityType: d.entity_type,
+              entityId: d.entity_id,
+              details: detailsText,
+              createdAt: d.created_at,
+            };
+          });
         }
       } catch (e) {
         console.warn("Could not fetch audit logs from DB");
@@ -1577,14 +1600,16 @@ export const db = {
       airport_id: airportId,
     };
 
-    // Save to local storage cache immediately
+    // Save to local storage cache immediately for offline responsiveness
     try {
-      const existingStr = localStorage.getItem("skyops_roster_updates");
-      const existing: RosterUpdate[] = existingStr ? JSON.parse(existingStr) : [];
-      const updated = [newRecord, ...existing.filter(r => r.id !== newRecord.id)].slice(0, 500);
-      localStorage.setItem("skyops_roster_updates", JSON.stringify(updated));
+      if (typeof localStorage !== "undefined") {
+        const existingStr = localStorage.getItem("skyops_roster_updates");
+        const existing: RosterUpdate[] = existingStr ? JSON.parse(existingStr) : [];
+        const updated = [newRecord, ...existing.filter(r => r.id !== newRecord.id)].slice(0, 500);
+        localStorage.setItem("skyops_roster_updates", JSON.stringify(updated));
+      }
 
-      // Broadcast local event for immediate reactivity
+      // Broadcast local event for immediate reactivity in current window
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("skyops:roster_update", { detail: newRecord })
@@ -1594,31 +1619,34 @@ export const db = {
       console.warn("Could not save roster update to localStorage:", e);
     }
 
-    // Also attempt insertion to Supabase if configured
+    // Persist to Supabase audit_logs table (which is actively configured and synchronized)
     if (supabase) {
       try {
-        await supabase.from("roster_updates").insert({
+        let summary = `${newRecord.change_type} on ${newRecord.affected_date}`;
+        if (newRecord.staff_name) {
+          summary = `${newRecord.staff_name} (${newRecord.staff_initials || ""}): ${newRecord.from_shift_name || newRecord.from_value || "None"} ➔ ${newRecord.to_shift_name || newRecord.to_value || "Updated"} on ${newRecord.affected_date}`;
+        } else if (newRecord.to_value) {
+          summary = `${newRecord.change_type}: ${newRecord.to_value} on ${newRecord.affected_date}`;
+        }
+
+        const payload = JSON.stringify({
+          ...newRecord,
+          summary,
+        });
+
+        await supabase.from("audit_logs").insert({
           id: newRecord.id,
-          change_type: newRecord.change_type,
-          staff_id: newRecord.staff_id,
-          staff_name: newRecord.staff_name,
-          staff_initials: newRecord.staff_initials,
-          from_value: newRecord.from_value,
-          to_value: newRecord.to_value,
-          affected_date: newRecord.affected_date,
-          from_shift_id: newRecord.from_shift_id,
-          to_shift_id: newRecord.to_shift_id,
-          from_shift_name: newRecord.from_shift_name,
-          to_shift_name: newRecord.to_shift_name,
-          changed_by_id: newRecord.changed_by_id,
-          changed_by_name: newRecord.changed_by_name,
-          changed_at: newRecord.changed_at,
-          week_start: newRecord.week_start,
-          airport_id: newRecord.airport_id,
+          user_id: userId,
+          user_email: userName,
+          action_type: "ROSTER_UPDATE",
+          entity_type: "PROGRAM",
+          entity_id: affectedDate,
+          details: payload,
+          airport_id: airportId,
+          created_at: newRecord.changed_at,
         });
       } catch (err) {
-        // Table might not exist yet in Postgres, silent fallback is active
-        console.warn("Could not insert roster update to Supabase DB:", err);
+        console.warn("Could not insert roster update to Supabase audit_logs:", err);
       }
     }
   },
@@ -1641,13 +1669,14 @@ export const db = {
     }
     const currentAirportId = params?.airportId || profile?.airport_id;
 
-    // First attempt to query Supabase if present
+    // First attempt to query Supabase audit_logs
     if (supabase) {
       try {
         let query = supabase
-          .from("roster_updates")
+          .from("audit_logs")
           .select("*", { count: "exact" })
-          .order("changed_at", { ascending: false });
+          .eq("action_type", "ROSTER_UPDATE")
+          .order("created_at", { ascending: false });
 
         if (profile?.role !== "super_admin" && currentAirportId) {
           query = query.eq("airport_id", currentAirportId);
@@ -1657,18 +1686,8 @@ export const db = {
 
         if (params?.startDate && params?.endDate) {
           query = query
-            .gte("affected_date", params.startDate)
-            .lte("affected_date", params.endDate);
-        } else if (params?.weekStart && params.weekStart !== "ALL") {
-          query = query.eq("week_start", params.weekStart);
-        }
-
-        if (params?.staffId && params.staffId !== "ALL") {
-          query = query.eq("staff_id", params.staffId);
-        }
-
-        if (params?.changeType && params.changeType !== "ALL") {
-          query = query.eq("change_type", params.changeType);
+            .gte("entity_id", params.startDate)
+            .lte("entity_id", params.endDate);
         }
 
         const limit = params?.limit || 100;
@@ -1677,27 +1696,62 @@ export const db = {
 
         const { data, count, error } = await query;
         if (!error && data && data.length > 0) {
+          const parsedList: RosterUpdate[] = [];
+          for (const d of data) {
+            let item: RosterUpdate;
+            try {
+              const detailsObj = typeof d.details === "string" ? JSON.parse(d.details) : d.details;
+              item = {
+                id: d.id,
+                change_type: detailsObj.change_type || "SHIFT_CHANGE",
+                staff_id: detailsObj.staff_id || null,
+                staff_name: detailsObj.staff_name || null,
+                staff_initials: detailsObj.staff_initials || null,
+                from_value: detailsObj.from_value || null,
+                to_value: detailsObj.to_value || null,
+                affected_date: detailsObj.affected_date || d.entity_id,
+                from_shift_id: detailsObj.from_shift_id || null,
+                to_shift_id: detailsObj.to_shift_id || null,
+                from_shift_name: detailsObj.from_shift_name || null,
+                to_shift_name: detailsObj.to_shift_name || null,
+                changed_by_id: d.user_id,
+                changed_by_name: detailsObj.changed_by_name || d.user_email || "System",
+                changed_at: d.created_at || detailsObj.changed_at,
+                week_start: detailsObj.week_start || null,
+                airport_id: d.airport_id || detailsObj.airport_id || null,
+              };
+            } catch {
+              item = {
+                id: d.id,
+                change_type: "SHIFT_CHANGE",
+                affected_date: d.entity_id,
+                from_value: "",
+                to_value: d.details,
+                changed_by_id: d.user_id,
+                changed_by_name: d.user_email || "System",
+                changed_at: d.created_at,
+                airport_id: d.airport_id,
+              };
+            }
+
+            // In-memory filters for nested properties if needed
+            if (params?.staffId && params.staffId !== "ALL" && item.staff_id !== params.staffId) {
+              continue;
+            }
+            if (params?.changeType && params.changeType !== "ALL" && item.change_type !== params.changeType) {
+              continue;
+            }
+            if (params?.weekStart && params.weekStart !== "ALL") {
+              const w = item.week_start || (item.affected_date ? getMonday(item.affected_date) : "");
+              if (w !== params.weekStart) continue;
+            }
+
+            parsedList.push(item);
+          }
+
           return {
-            data: data.map((d: any) => ({
-              id: d.id,
-              change_type: d.change_type,
-              staff_id: d.staff_id,
-              staff_name: d.staff_name,
-              staff_initials: d.staff_initials,
-              from_value: d.from_value,
-              to_value: d.to_value,
-              affected_date: d.affected_date,
-              from_shift_id: d.from_shift_id,
-              to_shift_id: d.to_shift_id,
-              from_shift_name: d.from_shift_name,
-              to_shift_name: d.to_shift_name,
-              changed_by_id: d.changed_by_id,
-              changed_by_name: d.changed_by_name,
-              changed_at: d.changed_at,
-              week_start: d.week_start,
-              airport_id: d.airport_id,
-            })),
-            count: count || data.length,
+            data: parsedList,
+            count: count ?? parsedList.length,
           };
         }
       } catch (err) {
@@ -1705,9 +1759,9 @@ export const db = {
       }
     }
 
-    // Fallback: load from localStorage
+    // Fallback: load from localStorage cache
     try {
-      const stored = localStorage.getItem("skyops_roster_updates");
+      const stored = typeof localStorage !== "undefined" ? localStorage.getItem("skyops_roster_updates") : null;
       let list: RosterUpdate[] = stored ? JSON.parse(stored) : [];
 
       // Filter by airport if not super_admin
@@ -1776,18 +1830,46 @@ export const db = {
       };
     }
 
+    // Subscribe to audit_logs table for real-time multi-user synchronisation
     const channel = supabase
-      .channel("roster_updates_channel")
+      .channel("roster_updates_audit_channel")
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
-          table: "roster_updates",
+          table: "audit_logs",
         },
         (payload) => {
-          if (payload.new) {
-            onInsert(payload.new as RosterUpdate);
+          if (payload.new && payload.new.action_type === "ROSTER_UPDATE") {
+            try {
+              const parsed =
+                typeof payload.new.details === "string"
+                  ? JSON.parse(payload.new.details)
+                  : payload.new.details;
+              const updateItem: RosterUpdate = {
+                id: payload.new.id,
+                change_type: parsed.change_type || "SHIFT_CHANGE",
+                staff_id: parsed.staff_id || null,
+                staff_name: parsed.staff_name || null,
+                staff_initials: parsed.staff_initials || null,
+                from_value: parsed.from_value || null,
+                to_value: parsed.to_value || null,
+                affected_date: parsed.affected_date || payload.new.entity_id,
+                from_shift_id: parsed.from_shift_id || null,
+                to_shift_id: parsed.to_shift_id || null,
+                from_shift_name: parsed.from_shift_name || null,
+                to_shift_name: parsed.to_shift_name || null,
+                changed_by_id: payload.new.user_id,
+                changed_by_name: parsed.changed_by_name || payload.new.user_email || "System",
+                changed_at: payload.new.created_at || parsed.changed_at,
+                week_start: parsed.week_start || null,
+                airport_id: payload.new.airport_id,
+              };
+              onInsert(updateItem);
+            } catch (e) {
+              console.warn("Could not parse live roster update from audit_logs:", e);
+            }
           }
         }
       )
@@ -1800,7 +1882,6 @@ export const db = {
       supabase?.removeChannel(channel);
     };
   },
-
 
   async getCgConfig(): Promise<CgConfig> {
     if (!supabase) {

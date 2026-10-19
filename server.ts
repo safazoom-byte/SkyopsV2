@@ -101,6 +101,19 @@ async function startServer() {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
+      const { data: userProf } = await supabase
+        .from("user_profiles")
+        .select("is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!userProf) {
+        return res.status(403).json({ error: "User profile not found or account was deleted." });
+      }
+      if (userProf.is_active === false) {
+        return res.status(403).json({ error: "Account is frozen. You cannot generate programs or access AI features." });
+      }
+
       const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
       if (!apiKey) {
         return res.status(400).json({ error: "API Key missing on server" });
