@@ -1752,6 +1752,13 @@ export const ProgramDisplay: React.FC<Props> = ({
       });
       
       const profile = await db.getUserProfile(true);
+
+      if (isNewX) {
+        sheet.properties.tabColor = { argb: 'FF0B1F3A' };
+        workbook.creator = "SkyOPS Ground Operations";
+        workbook.title = `ASE SDU Weekly Ground Handling Roster ${startDate} to ${endDate}`;
+        workbook.created = new Date();
+      }
       
       sheet.columns = [
         { width: 10 }, { width: 18 }, { width: 10 }, { width: 10 },
@@ -1830,6 +1837,10 @@ export const ProgramDisplay: React.FC<Props> = ({
         const dayName = DAYS_OF_WEEK_FULL[d.getUTCDay()];
         const dateFormatted = `${d.getUTCDate()}-${d.toLocaleString('default', { month: 'short' }).toUpperCase()}-${d.getUTCFullYear().toString().substr(2)}`;
         
+        if (isNewX && prog !== activePrograms[0]) {
+          const spacer = sheet.addRow([]);
+          spacer.height = 8;
+        }
         const dayRow = sheet.addRow([`${dayName} ${dateFormatted}`, "", "", "", "", "", "", ""]);
         sheet.mergeCells(`A${dayRow.number}:H${dayRow.number}`);
         const dayHeaderCell = sheet.getCell(`A${dayRow.number}`);
@@ -2047,6 +2058,22 @@ export const ProgramDisplay: React.FC<Props> = ({
                 }
               }
 
+              if (isNewX && f.flightNumber) {
+                const AIRLINES: Record<string, string> = { SM: "Air Cairo", XY: "flynas", KNE: "flynas", SV: "Saudia", FZ: "flydubai", J9: "Jazeera", RB: "Syrian Air", G9: "Air Arabia", ABY: "Air Arabia", JZR: "Jazeera" };
+                const fnU = f.flightNumber.toUpperCase().replace(/\s/g, "");
+                const pre = fnU.match(/^([A-Z0-9]{2,3}?)\d/);
+                const airline = pre ? (AIRLINES[pre[1]] || AIRLINES[fnU.slice(0, 2)] || "") : "";
+                const subLine = [airline, f.aircraftType || ""].filter(Boolean).join(" · ");
+                if (subLine) {
+                  sheet.getCell(`B${rt.number}`).value = {
+                    richText: [
+                      { text: f.flightNumber.replace("/", " / ") + "\n", font: { name: 'Consolas', bold: true, size: 10 } },
+                      { text: subLine, font: { italic: true, size: 8, color: { argb: 'FF64748B' } } },
+                    ],
+                  };
+                }
+              }
+
               if (f.eta) {
                  const cell = sheet.getCell(`D${rt.number}`);
                  cell.value = {
@@ -2088,6 +2115,11 @@ export const ProgramDisplay: React.FC<Props> = ({
                  const pickupCell = sheet.getCell(`G${rt.number}`);
                  pickupCell.font = { bold: true, size: 10 };
                  pickupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+                 if (isNewX) {
+                   const ph = parseInt((shift.pickupTime || "").split(":")[0]);
+                   const tint = isNaN(ph) ? 'FFE2E8F0' : ph >= 4 && ph < 12 ? 'FFFEF9C3' : ph >= 12 && ph < 18 ? 'FFFFEDD5' : 'FFE0E7FF';
+                   pickupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tint } };
+                 }
              }
           });
           
@@ -2156,6 +2188,20 @@ export const ProgramDisplay: React.FC<Props> = ({
           }
           staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+
+          if (isNewX) {
+            const hcCount = assignments.filter((a) => {
+              const st = getStaff(a.staffId);
+              return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
+            }).length;
+            const hcFull = hcCount >= shift.maxStaff;
+            sheet.getCell(`A${startRowNo}`).value = {
+              richText: [
+                { text: `${idx + 1}\n`, font: { bold: true, size: 11 } },
+                { text: `HC ${hcCount}/${shift.maxStaff}`, font: { bold: true, size: 8, color: { argb: hcFull ? 'FF15803D' : 'FFB45309' } } },
+              ],
+            };
+          }
 
           let line1Text = line1Tokens.map(t => t.text).join(" - ");
           let line2Text = line2Tokens.map(t => t.text).join(" - ");
@@ -2282,7 +2328,7 @@ export const ProgramDisplay: React.FC<Props> = ({
         sheet.headerFooter = {
           oddFooter: "&L&8CONFIDENTIAL – INTERNAL USE&C&8Page &P of &N&R&8SkyOPS Ground Operations",
         };
-        sheet.views = [{ state: "frozen", ySplit: newHeaderRowNo }];
+        sheet.views = [{ state: "frozen", ySplit: newHeaderRowNo, showGridLines: false }];
       }
 
       // --- D.S Sheet ---
