@@ -1721,7 +1721,19 @@ export const ProgramDisplay: React.FC<Props> = ({
     setIsGeneratingPdf(false);
   };
 
-  const generateStaffExcelReport = async () => {
+  const generateStaffExcelReport = async (variant: "classic" | "new" = "classic") => {
+    const isNewX = variant === "new";
+    const shiftIcon = (t?: string) => {
+      const h = parseInt((t || "").split(":")[0]);
+      if (isNaN(h)) return "";
+      if (h >= 4 && h < 12) return "🌅";
+      if (h >= 12 && h < 18) return "☀";
+      return "🌙";
+    };
+    const absPal = isNewX
+      ? { base: 'FFE8EEF5', strong: 'FFD3DEEC', text: 'FF1E3A5F', text2: 'FF334155', text3: 'FF0B1F3A' }
+      : { base: 'FFFEF3C7', strong: 'FFFDE68A', text: 'FF92400E', text2: 'FFB45309', text3: 'FF78350F' };
+    let newHeaderRowNo = 0;
     setIsGeneratingExcel(true);
     try {
       const ExcelJS = await import("exceljs");
@@ -1747,13 +1759,32 @@ export const ProgramDisplay: React.FC<Props> = ({
       ];
 
       const row1 = sheet.addRow([]);
-      row1.height = 45;
+      row1.height = isNewX ? 62 : 45;
       
       sheet.mergeCells('B1:G1');
       const titleCell = sheet.getCell('B1');
       titleCell.value = `ASE SDU Weekly Program From ${startDate} Till ${endDate}`;
       titleCell.font = { name: 'Arial', size: 15, bold: true };
       titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      if (isNewX) {
+        ['A1', 'H1'].forEach((addr) => {
+          sheet.getCell(addr).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B1F3A' } };
+        });
+        titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B1F3A' } };
+        titleCell.value = {
+          richText: [
+            { text: "✈  ASE SDU · WEEKLY GROUND HANDLING ROSTER\n", font: { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } } },
+            { text: `PERIOD  ${startDate}  →  ${endDate}`, font: { name: 'Consolas', size: 11, bold: true, color: { argb: 'FFFBBF24' } } },
+          ],
+        };
+        titleCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        const accent = sheet.addRow([]);
+        accent.height = 5;
+        for (let c = 1; c <= 8; c++) {
+          accent.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBBF24' } };
+        }
+      }
 
       if (profile?.companyLogo && profile.companyLogo.includes(';base64,')) {
         const parts = profile.companyLogo.split(';base64,');
@@ -1777,7 +1808,9 @@ export const ProgramDisplay: React.FC<Props> = ({
         }
       }
 
-      const headers = ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
+      const headers = isNewX
+        ? ["S/N", "FLIGHT", "FROM", "↘ STA", "↗ STD", "TO", "PICK-UP", "GROUND STAFF ASSIGNMENT"]
+        : ["S/N", "Flight No/Day", "From", "STA", "STD", "To", "Pick up Time", "SDU Staff Assignment (staff initials)"];
       const headerRow = sheet.addRow(headers);
       headerRow.height = 25;
       headerRow.eachCell((cell) => {
@@ -1785,7 +1818,12 @@ export const ProgramDisplay: React.FC<Props> = ({
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F0F0' } };
         cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        if (isNewX) {
+          cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B1F3A' } };
+        }
       });
+      newHeaderRowNo = headerRow.number;
 
       activePrograms.forEach(prog => {
         const d = new Date(`${prog.dateString || startDate}T12:00:00Z`);
@@ -1863,6 +1901,13 @@ export const ProgramDisplay: React.FC<Props> = ({
           .filter((s) => s.pickupDate === prog.dateString && !s.isHidden)
           .sort((a, b) => a.pickupTime.localeCompare(b.pickupTime));
           
+        if (isNewX) {
+          dayHeaderCell.value = `✈  ${dayName.toUpperCase()}  ${dateFormatted}   ·   ${shiftsToday.length} Shifts   ·   ${workingIds.size} Working   ·   ${offStaff.length} Off`;
+          dayHeaderCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+          dayHeaderCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+          dayHeaderCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+        }
+
         shiftsToday.forEach((shift, idx) => {
           const assignments = sortAssignments(prog.assignments.filter(a => a.shiftId === shift.id)).filter((a, index, self) => self.findIndex(t => t.staffId === a.staffId) === index);
           
@@ -1929,7 +1974,7 @@ export const ProgramDisplay: React.FC<Props> = ({
                 f.sta || "NS",
                 f.std || "---",
                 f.to || "",
-                fIndex === 0 ? (shift.pickupTime || "N.S") : "",
+                fIndex === 0 ? (isNewX ? `${shiftIcon(shift.pickupTime)} ${shift.pickupTime || "N.S"}` : (shift.pickupTime || "N.S")) : "",
                 "" // staff will be added later
              ]);
              addedRows.push(rt);
@@ -1962,7 +2007,9 @@ export const ProgramDisplay: React.FC<Props> = ({
              rt.eachCell((cell, colNumber) => {
                  cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
                  cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
-                 cell.font = { bold: true, size: 10 };
+                 cell.font = isNewX && colNumber >= 3 && colNumber <= 6
+                   ? { name: 'Consolas', bold: true, size: 10 }
+                   : { bold: true, size: 10 };
                  
                  if (colNumber >= 2 && colNumber <= 6) {
                      // Flight columns (2 to 6)
@@ -2165,25 +2212,24 @@ export const ProgramDisplay: React.FC<Props> = ({
             cell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
             cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
             
-            // Pale Amber / Warning background
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // amber-100
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: absPal.base } };
             
             if (colNumber === 1) {
-              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 }; // amber-900
+              cell.font = { bold: true, color: { argb: absPal.text }, size: 9 };
             } else if (colNumber === 2) {
-              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 10 };
+              cell.font = { bold: true, color: { argb: absPal.text }, size: 10 };
             } else if (colNumber === 4 || colNumber === 5) {
-              cell.font = { bold: true, color: { argb: 'FFB45309' }, size: 9 }; // amber-700
+              cell.font = { bold: true, color: { argb: absPal.text2 }, size: 9 };
             } else if (colNumber === 7) {
-              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 };
-              // Highlight the OFF-DUTY cell slightly darker amber
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } }; // amber-200
+              cell.font = { bold: true, color: { argb: absPal.text }, size: 9 };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: absPal.strong } };
             } else if (colNumber === 8) {
-              cell.font = { bold: true, color: { argb: 'FF78350F' }, size: 10 }; // amber-950
+              cell.font = { bold: true, color: { argb: absPal.text3 }, size: 10 };
             } else {
-              cell.font = { bold: true, color: { argb: 'FF92400E' }, size: 9 };
+              cell.font = { bold: true, color: { argb: absPal.text }, size: 9 };
             }
           });
+
           
           // Dynamic row height for the absence row
           const estimatedLines = Math.max(1, Math.ceil(fullStaffText.length / 55));
@@ -2201,6 +2247,43 @@ export const ProgramDisplay: React.FC<Props> = ({
       
       fRow1.getCell(1).font = { bold: true, size: 10 };
       fRow2.getCell(1).font = { bold: true, size: 10 };
+
+      if (isNewX) {
+        // ---- Summary ----
+        const totalShifts = activePrograms.reduce((n, p) => n + shifts.filter((s) => s.pickupDate === p.dateString && !s.isHidden).length, 0);
+        const flightIdSet = new Set<string>();
+        activePrograms.forEach((p) => shifts.filter((s) => s.pickupDate === p.dateString && !s.isHidden).forEach((s) => (s.flightIds || []).forEach((fid) => flightIdSet.add(fid))));
+        const totalStaffDays = activePrograms.reduce((n, p) => n + new Set(p.assignments.map((a) => a.staffId)).size, 0);
+
+        sheet.addRow([]);
+        const sumRow = sheet.addRow([`✈ SUMMARY  |  Days: ${activePrograms.length}  |  Shifts: ${totalShifts}  |  Flights: ${flightIdSet.size}  |  Staff-days: ${totalStaffDays}`]);
+        sheet.mergeCells(`A${sumRow.number}:H${sumRow.number}`);
+        sumRow.height = 22;
+        sumRow.getCell(1).font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+        sumRow.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0B1F3A" } };
+        sumRow.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+        // ---- Legend ----
+        const legendRow = sheet.addRow([
+          "LEGEND:  Staff colours — Black: Agent · Red: Labour · Purple: Security · Green: Driver · Blue: Accountant · Orange: Note · Underline: Extended duty  |  Red small text: ETA / ETD / CKI open time  |  Pick-up icons: 🌅 Morning (04–11) · ☀ Afternoon (12–17) · 🌙 Night (18–03)",
+        ]);
+        sheet.mergeCells(`A${legendRow.number}:H${legendRow.number}`);
+        legendRow.height = 32;
+        legendRow.getCell(1).font = { size: 8, italic: true, color: { argb: "FF334155" } };
+        legendRow.getCell(1).alignment = { horizontal: "left", vertical: "middle", wrapText: true };
+
+        const stampRow = sheet.addRow([`Generated by SkyOPS on ${new Date().toLocaleString()}  ·  CONFIDENTIAL – INTERNAL USE`]);
+        sheet.mergeCells(`A${stampRow.number}:H${stampRow.number}`);
+        stampRow.getCell(1).font = { size: 8, color: { argb: "FF64748B" } };
+        stampRow.getCell(1).alignment = { horizontal: "right" };
+
+        // ---- Print setup: repeat header, footer ----
+        sheet.pageSetup.printTitlesRow = `${newHeaderRowNo}:${newHeaderRowNo}`;
+        sheet.headerFooter = {
+          oddFooter: "&L&8CONFIDENTIAL – INTERNAL USE&C&8Page &P of &N&R&8SkyOPS Ground Operations",
+        };
+        sheet.views = [{ state: "frozen", ySplit: newHeaderRowNo }];
+      }
 
       // --- D.S Sheet ---
       const dsSheet = workbook.addWorksheet("D.S", { properties: { tabColor: { argb: 'FF10B981' } } });
@@ -2276,7 +2359,7 @@ export const ProgramDisplay: React.FC<Props> = ({
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      saveAs(blob, `SkyOPS_Staff_Program_${startDate}.xlsx`);
+      saveAs(blob, isNewX ? `SkyOPS_Staff_Program_NEW_${startDate}.xlsx` : `SkyOPS_Staff_Program_${startDate}.xlsx`);
     } catch (err) {
       console.error(err);
       alert("Failed to export Excel report.");
@@ -3848,15 +3931,25 @@ export const ProgramDisplay: React.FC<Props> = ({
               {isGeneratingPdf ? <Printer size={15} className="animate-spin" /> : <FileDown size={15} />}
               <span className="hidden sm:inline">PDF</span>
             </button>
-            {/* Staff Excel — always visible, prominent green */}
+            {/* Staff Excel — current (classic) version, unchanged */}
             <button
-              onClick={generateStaffExcelReport}
+              onClick={() => generateStaffExcelReport("classic")}
               disabled={isGeneratingExcel || activePrograms.length === 0}
               className="px-4 py-3 bg-emerald-500 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-emerald-400 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-40"
               title="Export Staff Excel"
             >
               {isGeneratingExcel ? <Printer size={15} className="animate-spin" /> : <FileDown size={15} />}
               <span>Staff Excel</span>
+            </button>
+            {/* Staff Excel NEW — redesigned aviation look (for review) */}
+            <button
+              onClick={() => generateStaffExcelReport("new")}
+              disabled={isGeneratingExcel || activePrograms.length === 0}
+              className="px-4 py-3 bg-violet-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-violet-500 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-40"
+              title="Export Staff Excel (new aviation design — preview)"
+            >
+              {isGeneratingExcel ? <Printer size={15} className="animate-spin" /> : <FileDown size={15} />}
+              <span>Staff Excel New</span>
             </button>
             {/* placeholder to remove unused state warning */}
             {false && showExportMenu && <span/>}
