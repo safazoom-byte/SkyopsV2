@@ -1248,6 +1248,53 @@ const App: React.FC = () => {
     }
   };
 
+  const handleUpdateFlight = async (f: Flight) => {
+    if (userProfile && !userProfile.isActive) {
+      alert("Your account is frozen.");
+      return;
+    }
+    const oldFlights = [...flights];
+    const normFNum = normalizeFlightNumber(f.flightNumber);
+    const duplicateIdx = flights.findIndex(
+      (existing) =>
+        existing.id !== f.id &&
+        existing.date === f.date &&
+        normalizeFlightNumber(existing.flightNumber) === normFNum
+    );
+    if (duplicateIdx !== -1) {
+      const existing = flights[duplicateIdx];
+      if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
+        const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
+        setFlights([...newFlights, f]);
+        try {
+          await db.deleteFlight(existing.id);
+          await db.upsertFlight(f);
+          await db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
+        } catch (err) {
+          console.error("Failed to update flight, rolling back:", err);
+          setFlights(oldFlights);
+          setNotification("Database error: Failed to update flight.");
+        }
+      }
+      return;
+    }
+
+    setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
+    try {
+      await db.upsertFlight(f);
+      await db.logAction(
+        "UPDATE",
+        "FLIGHT",
+        f.id,
+        `Updated flight ${f.flightNumber}`,
+      );
+    } catch (err) {
+      console.error("Failed to update flight, rolling back:", err);
+      setFlights(oldFlights);
+      setNotification("Database error: Failed to update flight.");
+    }
+  };
+
   if (isInitializing)
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
@@ -2293,52 +2340,7 @@ const App: React.FC = () => {
                 setNotification("Database error: Failed to add flight.");
               }
             }}
-            onUpdate={async (f) => {
-              if (userProfile && !userProfile.isActive) {
-                alert("Your account is frozen.");
-                return;
-              }
-              const oldFlights = [...flights];
-              const normFNum = normalizeFlightNumber(f.flightNumber);
-              const duplicateIdx = flights.findIndex(
-                (existing) =>
-                  existing.id !== f.id &&
-                  existing.date === f.date &&
-                  normalizeFlightNumber(existing.flightNumber) === normFNum
-              );
-              if (duplicateIdx !== -1) {
-                const existing = flights[duplicateIdx];
-                if (window.confirm(`Flight ${f.flightNumber} already exists on ${f.date}. Do you want to delete the old one and replace it with this update?`)) {
-                   const newFlights = [...flights].filter(fl => fl.id !== existing.id && fl.id !== f.id);
-                   setFlights([...newFlights, f]);
-                   try {
-                     await db.deleteFlight(existing.id);
-                     await db.upsertFlight(f);
-                     await db.logAction("UPDATE", "FLIGHT", f.id, `Updated flight ${f.flightNumber} replacing duplicate`);
-                   } catch (err) {
-                     console.error("Failed to update flight, rolling back:", err);
-                     setFlights(oldFlights);
-                     setNotification("Database error: Failed to update flight.");
-                   }
-                }
-                return;
-              }
-
-              setFlights((p) => p.map((o) => (o.id === f.id ? f : o)));
-              try {
-                await db.upsertFlight(f);
-                await db.logAction(
-                  "UPDATE",
-                  "FLIGHT",
-                  f.id,
-                  `Updated flight ${f.flightNumber}`,
-                );
-              } catch (err) {
-                console.error("Failed to update flight, rolling back:", err);
-                setFlights(oldFlights);
-                setNotification("Database error: Failed to update flight.");
-              }
-            }}
+            onUpdate={handleUpdateFlight}
             onDelete={async (id) => {
               if (userProfile && !userProfile.isActive) {
                 alert("Your account is frozen.");
