@@ -2189,20 +2189,6 @@ export const ProgramDisplay: React.FC<Props> = ({
           staffCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           staffCell.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
 
-          if (isNewX) {
-            const hcCount = assignments.filter((a) => {
-              const st = getStaff(a.staffId);
-              return st && !st.isLabour && !st.isDriver && !st.isSecurity && !st.isAccountant;
-            }).length;
-            const hcFull = hcCount >= shift.maxStaff;
-            sheet.getCell(`A${startRowNo}`).value = {
-              richText: [
-                { text: `${idx + 1}\n`, font: { bold: true, size: 11 } },
-                { text: `HC ${hcCount}/${shift.maxStaff}`, font: { bold: true, size: 8, color: { argb: hcFull ? 'FF15803D' : 'FFB45309' } } },
-              ],
-            };
-          }
-
           let line1Text = line1Tokens.map(t => t.text).join(" - ");
           let line2Text = line2Tokens.map(t => t.text).join(" - ");
           
